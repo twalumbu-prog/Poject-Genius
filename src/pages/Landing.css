@@ -1,0 +1,109 @@
+.landing-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: var(--spacing-lg);
+}
+
+.landing-container {
+    max-width: 900px;
+    width: 100%;
+}
+
+.landing-header {
+    text-align: center;
+    margin-bottom: var(--spacing-3xl);
+    color: white;
+}
+
+.logo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 80px;
+    height: 80px;
+    background-color: rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(10px);
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--spacing-lg);
+    box-shadow: var(--shadow-lg);
+}
+
+.app-title {
+    font-size: var(--font-size-4xl);
+    font-weight: var(--font-weight-bold);
+    margin-bottom: var(--spacing-md);
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+}
+
+.app-description {
+    font-size: var(--font-size-lg);
+    opacity: 0.95;
+    max-width: 500px;
+    margin: 0 auto;
+}
+
+.landing-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: var(--spacing-xl);
+    margin-bottom: var(--spacing-2xl);
+}
+
+.action-card {
+    background: white;
+    border-radius: var(--radius-xl);
+    padding: var(--spacing-2xl);
+    box-shadow: var(--shadow-xl);
+    transition: transform var(--transition-base);
+}
+
+.action-card:hover {
+    transform: translateY(-4px);
+}
+
+.action-card h2 {
+    font-size: var(--font-size-2xl);
+    margin-bottom: var(--spacing-sm);
+    color: var(--color-text-primary);
+}
+
+.action-card p {
+    color: var(--color-text-secondary);
+    margin-bottom: var(--spacing-lg);
+    line-height: var(--line-height-relaxed);
+}
+
+.action-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.btn-large {
+    padding: var(--spacing-md) var(--spacing-xl);
+    font-size: var(--font-size-lg);
+}
+
+.landing-footer {
+    text-align: center;
+    color: white;
+    opacity: 0.9;
+    font-size: var(--font-size-sm);
+}
+
+@media (max-width: 640px) {
+    .app-title {
+        font-size: var(--font-size-3xl);
+    }
+
+    .landing-actions {
+        grid-template-columns: 1fr;
+    }
+
+    .action-card {
+        padding: var(--spacing-xl);
+    }
+}

@@ -1,0 +1,31 @@
+.teacher-layout {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--color-bg-primary);
+}
+
+.teacher-main {
+    flex: 1;
+    padding: var(--spacing-lg);
+    padding-bottom: calc(var(--mobile-nav-height) + var(--spacing-lg));
+    max-width: var(--max-width-container);
+    width: 100%;
+    margin: 0 auto;
+}
+
+.loading-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    font-size: var(--font-size-lg);
+    color: var(--color-text-secondary);
+}
+
+@media (min-width: 768px) {
+    .teacher-main {
+        padding: var(--spacing-xl);
+        padding-bottom: calc(var(--mobile-nav-height) + var(--spacing-xl));
+    }
+}

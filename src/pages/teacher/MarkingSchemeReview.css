@@ -1,0 +1,317 @@
+.review-page {
+    padding-top: 140px;
+}
+
+.review-header-fixed {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: white;
+    padding: var(--spacing-md) var(--spacing-xl);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-lg);
+    border-bottom: 1px solid var(--color-border);
+    z-index: 100;
+    box-shadow: var(--shadow-sm);
+}
+
+.header-content {
+    flex-grow: 1;
+}
+
+.header-actions {
+    display: flex;
+    gap: var(--spacing-md);
+    align-items: center;
+}
+
+.ai-btn {
+    background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+    color: white;
+    border: none;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.ai-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(99, 102, 241, 0.4);
+    background: linear-gradient(135deg, #4f46e5 0%, #9333ea 100%);
+}
+
+.ai-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    background: #e2e8f0;
+    color: #94a3b8;
+    box-shadow: none;
+}
+
+.header-content h1 {
+    font-size: var(--font-size-lg);
+    margin: 0;
+}
+
+.header-content p {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+    margin: 0;
+}
+
+.save-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.questions-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-2xl);
+}
+
+.question-edit-card {
+    background: white;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.question-num {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: bold;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+}
+
+.delete-q-btn {
+    background: none;
+    border: none;
+    color: var(--color-error);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+}
+
+.delete-q-btn:hover {
+    background: #fee2e2;
+}
+
+.question-body-edit {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) 0;
+    border-bottom: 1px dashed var(--color-border);
+    margin-bottom: var(--spacing-sm);
+}
+
+.options-grid-edit {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-sm);
+}
+
+.textarea-q {
+    width: 100%;
+    resize: vertical;
+    font-family: inherit;
+}
+
+.full-width {
+    width: 100%;
+}
+
+.question-fields {
+    display: flex;
+    gap: var(--spacing-md);
+    flex-wrap: wrap;
+}
+
+.field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.field-group label {
+    font-size: 10px;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+    font-weight: 600;
+}
+
+.flex-grow {
+    flex-grow: 1;
+}
+
+.add-q-btn-large {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md);
+    border-style: dashed;
+}
+
+.empty-questions {
+    text-align: center;
+    padding: var(--spacing-3xl);
+    color: var(--color-text-secondary);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+.error-banner {
+    background: #fef2f2;
+    border: 1px solid #fee2e2;
+    color: var(--color-error);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-lg);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.input-sm {
+    padding: 8px;
+    font-size: var(--font-size-sm);
+}
+
+/* Print Styles for PDF Export */
+/* Print Helpers */
+.print-only {
+    display: none;
+}
+
+/* Print Styles for PDF Export */
+@media print {
+
+    /* Hide UI elements */
+    .review-header-fixed,
+    .back-button,
+    .header-actions,
+    .delete-q-btn,
+    .add-q-btn-large,
+    .error-banner,
+    .empty-questions,
+    .question-fields,
+    .screen-only {
+        display: none !important;
+    }
+
+    /* Show Print Elements */
+    .print-only {
+        display: block !important;
+    }
+
+    /* Reset page layout */
+    .review-page {
+        padding-top: 0 !important;
+        margin: 0;
+    }
+
+    .review-content {
+        max-width: 100%;
+        margin: 0;
+        padding: 20px;
+    }
+
+    /* Add header for print */
+    .review-content::before {
+        content: "Test Paper";
+        display: block;
+        font-size: 24px;
+        font-weight: bold;
+        text-align: center;
+        margin-bottom: 30px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #000;
+    }
+
+    /* Question cards */
+    .question-edit-card {
+        page-break-inside: avoid;
+        border: none;
+        margin-bottom: 25px;
+        padding: 0;
+        background: transparent !important;
+    }
+
+    /* Show question number prominently */
+    .question-num {
+        font-size: 16px;
+        font-weight: bold;
+        margin-bottom: 8px;
+        color: #000;
+    }
+
+    /* Question Text */
+    .question-text-print {
+        font-size: 14px;
+        margin-bottom: 15px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+    }
+
+    .question-body-edit {
+        border: none;
+        padding: 0;
+        margin-bottom: 10px;
+    }
+
+    /* Options Grid */
+    .options-grid-edit {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        padding-left: 10px;
+    }
+
+    .option-text-print {
+        font-size: 14px;
+        line-height: 1.4;
+    }
+
+    .options-grid-edit .field-group {
+        border: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    /* Page breaks */
+    .questions-list {
+        display: block;
+    }
+
+    /* Ensure black text for printing */
+    * {
+        color: #000 !important;
+        background: transparent !important;
+        box-shadow: none !important;
+        text-shadow: none !important;
+    }
+
+    /* Add footer with page numbers */
+    @page {
+        margin: 2cm;
+
+        @bottom-right {
+            content: "Page " counter(page) " of " counter(pages);
+        }
+    }
+}

@@ -1,0 +1,116 @@
+.create-stream-page {
+    max-width: 700px;
+    margin: 0 auto;
+}
+
+.page-container {
+    background: white;
+    border-radius: var(--radius-xl);
+    padding: var(--spacing-2xl);
+    box-shadow: var(--shadow-sm);
+}
+
+.back-button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-sm);
+    margin-bottom: var(--spacing-xl);
+    padding: var(--spacing-sm);
+    border-radius: var(--radius-md);
+    transition: all var(--transition-fast);
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+.back-button:hover {
+    background-color: var(--color-bg-tertiary);
+    color: var(--color-text-primary);
+}
+
+.page-header {
+    margin-bottom: var(--spacing-2xl);
+}
+
+.page-header h1 {
+    font-size: var(--font-size-3xl);
+    margin-bottom: var(--spacing-sm);
+}
+
+.page-header p {
+    color: var(--color-text-secondary);
+    margin: 0;
+}
+
+.create-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xl);
+}
+
+.label-help {
+    color: var(--color-text-tertiary);
+    font-weight: var(--font-weight-normal);
+    margin-left: var(--spacing-sm);
+}
+
+.subjects-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: var(--spacing-md);
+}
+
+.subject-button {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+    border: 2px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: white;
+    color: var(--color-text-primary);
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-medium);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    text-align: left;
+}
+
+.subject-button:hover {
+    border-color: var(--color-accent-primary);
+    background-color: var(--color-accent-light);
+}
+
+.subject-button.active {
+    border-color: var(--color-accent-primary);
+    background-color: var(--color-accent-primary);
+    color: white;
+}
+
+.checkbox-icon {
+    width: 20px;
+    height: 20px;
+    border: 2px solid currentColor;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.subject-button.active .checkbox-icon {
+    border-color: white;
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+@media (max-width: 640px) {
+    .page-container {
+        padding: var(--spacing-xl);
+    }
+
+    .subjects-grid {
+        grid-template-columns: 1fr;
+    }
+}
