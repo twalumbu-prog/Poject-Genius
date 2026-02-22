@@ -1,11 +1,10 @@
 .top-bar {
     background-color: var(--color-bg-secondary);
-    border-bottom: 1px solid var(--color-border-light);
+    border-bottom: 2px solid var(--color-border-light);
     padding: var(--spacing-md) var(--spacing-lg);
     position: sticky;
     top: 0;
     z-index: var(--z-sticky);
-    box-shadow: var(--shadow-sm);
 }
 
 .top-bar-content {
@@ -26,12 +25,18 @@
     width: 48px;
     height: 48px;
     border-radius: var(--radius-full);
-    background: linear-gradient(135deg, var(--color-accent-primary), var(--color-accent-secondary));
+    background: linear-gradient(160deg, var(--color-warning), var(--color-accent-primary));
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: var(--font-size-2xl);
-    box-shadow: var(--shadow-md);
+    box-shadow: 0 3px 0 rgba(0, 0, 0, 0.1);
+    border: 3px solid white;
+    transition: transform var(--transition-fast);
+}
+
+.user-avatar:hover {
+    transform: scale(1.08) rotate(-5deg);
 }
 
 .user-text {
@@ -41,12 +46,19 @@
 
 .greeting {
     font-size: var(--font-size-lg);
-    font-weight: var(--font-weight-semibold);
+    font-weight: var(--font-weight-bold);
     color: var(--color-text-primary);
     margin: 0;
 }
 
 .icon-button {
     padding: var(--spacing-sm);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-lg);
+    color: var(--color-text-tertiary);
+    transition: all var(--transition-fast);
+}
+
+.icon-button:hover {
+    background-color: var(--color-error-light);
+    color: var(--color-error);
 }

@@ -1,0 +1,307 @@
+.perf-graph-wrapper {
+    padding: var(--spacing-md) 0;
+}
+
+.graph-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-md);
+}
+
+.graph-title {
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-bold);
+    color: var(--color-text-primary);
+}
+
+.btn-stats {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 16px;
+    border-radius: var(--radius-full);
+    border: 2px solid var(--color-border);
+    background: white;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-bold);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    font-family: inherit;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.btn-stats:hover {
+    border-color: var(--color-accent-primary);
+    color: var(--color-accent-primary);
+}
+
+.btn-stats.active {
+    border-color: var(--color-accent-primary);
+    background: var(--color-accent-light);
+    color: var(--color-accent-primary);
+}
+
+/* Graph */
+.graph-scroll-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: var(--spacing-sm);
+}
+
+.graph-container {
+    display: flex;
+    position: relative;
+    height: 220px;
+    padding-bottom: var(--spacing-sm);
+}
+
+.y-axis {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    height: 200px;
+    padding-right: var(--spacing-sm);
+    flex-shrink: 0;
+    width: 38px;
+}
+
+.y-label {
+    font-size: 10px;
+    color: var(--color-text-tertiary);
+    font-weight: var(--font-weight-semibold);
+    text-align: right;
+    line-height: 1;
+}
+
+.y-label.target-label {
+    color: var(--color-accent-primary);
+    font-weight: var(--font-weight-bold);
+}
+
+.chart-area {
+    flex: 1;
+    position: relative;
+    height: 200px;
+}
+
+.grid-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: var(--color-border-light);
+}
+
+.grid-line.target-line {
+    background: none;
+    border-top: 2px dashed var(--color-accent-primary);
+    z-index: 2;
+}
+
+.target-tag {
+    position: absolute;
+    right: 0;
+    top: -10px;
+    background: var(--color-accent-primary);
+    color: white;
+    font-size: 9px;
+    font-weight: var(--font-weight-bold);
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+}
+
+.bars-row {
+    display: flex;
+    align-items: flex-end;
+    height: 200px;
+    gap: 4px;
+    position: relative;
+    z-index: 3;
+    padding-left: var(--spacing-sm);
+}
+
+.bar-wrapper {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+}
+
+.bar-stacked {
+    width: 100%;
+    display: flex;
+    flex-direction: column-reverse;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    overflow: hidden;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    min-height: 2px;
+}
+
+.bar-stacked.at-target {
+    box-shadow: 0 -4px 12px rgba(88, 204, 2, 0.4);
+    border: 1px solid var(--color-success);
+}
+
+.bar-segment {
+    width: 100%;
+    transition: height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.bar-segment.easy {
+    background: var(--color-success);
+}
+
+.bar-segment.average {
+    background: var(--color-warning);
+}
+
+.bar-segment.hard {
+    background: var(--color-error);
+}
+
+/* Legend */
+.graph-legend {
+    display: flex;
+    justify-content: center;
+    gap: var(--spacing-lg);
+    margin-top: var(--spacing-md);
+    padding: var(--spacing-sm);
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-bold);
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+}
+
+.legend-dot.easy {
+    background: var(--color-success);
+}
+
+.legend-dot.average {
+    background: var(--color-warning);
+}
+
+.legend-dot.hard {
+    background: var(--color-error);
+}
+
+.graph-empty {
+    text-align: center;
+    padding: var(--spacing-xl);
+    color: var(--color-text-tertiary);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-sm);
+    font-weight: var(--font-weight-medium);
+}
+
+/* Stats Panel */
+.stats-panel {
+    margin-top: var(--spacing-lg);
+    background: var(--color-bg-primary);
+    border-radius: var(--radius-xl);
+    padding: var(--spacing-lg);
+    border: 2px solid var(--color-border-light);
+    animation: slideDown 0.25s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+}
+
+.stat-box {
+    text-align: center;
+    padding: var(--spacing-sm);
+    background: white;
+    border-radius: var(--radius-lg);
+    border: 2px solid var(--color-border-light);
+}
+
+.stat-box-value {
+    display: block;
+    font-size: var(--font-size-xl);
+    font-weight: var(--font-weight-extrabold);
+    color: var(--color-text-primary);
+    line-height: 1.3;
+}
+
+.stat-box-value.best {
+    color: var(--color-success);
+}
+
+.stat-box-value.positive {
+    color: var(--color-success);
+}
+
+.stat-box-value.negative {
+    color: var(--color-error);
+}
+
+.stat-box-label {
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-bold);
+    color: var(--color-text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-sm) 0;
+    border-top: 1px solid var(--color-border-light);
+}
+
+.stat-row-label {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-bold);
+    color: var(--color-text-secondary);
+}
+
+.stat-row-value {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-primary);
+}
+
+.commentary-box {
+    margin-top: var(--spacing-md);
+    padding: var(--spacing-md);
+    background: white;
+    border-radius: var(--radius-lg);
+    border: 2px solid var(--color-border-light);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-secondary);
+    line-height: var(--line-height-relaxed);
+}

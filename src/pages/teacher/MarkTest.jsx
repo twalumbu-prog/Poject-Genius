@@ -120,12 +120,23 @@ export default function MarkTest() {
             const topicPerformance = {};
             markingScheme.questions.forEach(q => {
                 if (!topicPerformance[q.topic]) {
-                    topicPerformance[q.topic] = { correct: 0, total: 0 };
+                    topicPerformance[q.topic] = {
+                        correct: 0, total: 0,
+                        easy_correct: 0, easy_total: 0,
+                        average_correct: 0, average_total: 0,
+                        hard_correct: 0, hard_total: 0,
+                    };
                 }
-                topicPerformance[q.topic].total++;
+                const tp = topicPerformance[q.topic];
+                tp.total++;
+
+                const difficulty = q.difficulty || 'average';
+                tp[`${difficulty}_total`]++;
+
                 const studentAns = studentAnswers.find(a => a.question_number === q.question_number);
                 if (studentAns?.is_correct) {
-                    topicPerformance[q.topic].correct++;
+                    tp.correct++;
+                    tp[`${difficulty}_correct`]++;
                 }
             });
 
@@ -134,7 +145,13 @@ export default function MarkTest() {
                 topic,
                 total_questions: data.total,
                 correct_answers: data.correct,
-                percentage: (data.correct / data.total) * 100
+                percentage: (data.correct / data.total) * 100,
+                easy_total: data.easy_total,
+                easy_correct: data.easy_correct,
+                average_total: data.average_total,
+                average_correct: data.average_correct,
+                hard_total: data.hard_total,
+                hard_correct: data.hard_correct,
             }));
 
             // Clean up old analysis for this result
@@ -146,7 +163,7 @@ export default function MarkTest() {
 
             if (analysisError) throw analysisError;
 
-            setResults({ studentName, score, percentage, correctCount });
+            setResults({ studentName, score, percentage, correctCount, studentAnswers });
             alert(`Successfully marked script for ${studentName}! Score: ${correctCount}/${markingScheme.questions.length}`);
         } catch (error) {
             console.error('AI Processing Error:', error);
@@ -209,15 +226,52 @@ export default function MarkTest() {
                     </div>
                 </div>
             ) : (
-                <div className="success-banner-large">
-                    <CheckCircle size={64} className="icon-success" />
-                    <h2>Marking Complete!</h2>
-                    <div className="result-summary-box">
+                <div className="success-banner-large" style={{ textAlign: "left", alignItems: "flex-start" }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                        <CheckCircle size={48} className="icon-success" />
+                        <h2 style={{ margin: 0 }}>Marking Complete!</h2>
+                    </div>
+
+                    <div className="result-summary-box" style={{ width: '100%', marginBottom: '24px' }}>
                         <p><strong>Student:</strong> {results.studentName}</p>
                         <p><strong>Total Score:</strong> {results.score} / {markingScheme.questions.length}</p>
                         <p><strong>Percentage:</strong> {results.percentage.toFixed(1)}%</p>
                     </div>
-                    <div className="banner-actions">
+
+                    <h3 style={{ marginBottom: '16px' }}>Detailed Breakdown</h3>
+                    <div className="answers-breakdown" style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '400px', overflowY: 'auto', paddingRight: '8px' }}>
+                        {results.studentAnswers && results.studentAnswers.map((ans, idx) => (
+                            <div key={idx} style={{
+                                padding: '12px',
+                                border: `1px solid ${ans.is_correct ? '#10b981' : '#ef4444'}`,
+                                borderRadius: '8px',
+                                backgroundColor: ans.is_correct ? '#ecfdf5' : '#fef2f2'
+                            }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                    <strong>Q{ans.question_number}</strong>
+                                    <span style={{
+                                        padding: '2px 8px',
+                                        borderRadius: '12px',
+                                        fontSize: '0.8rem',
+                                        backgroundColor: ans.confidence === 'Low' ? '#fef08a' : (ans.confidence === 'Medium' ? '#bfdbfe' : '#bbf7d0'),
+                                        color: '#374151'
+                                    }}>
+                                        {ans.confidence} Confidence
+                                    </span>
+                                </div>
+                                <div style={{ marginBottom: '4px' }}>
+                                    Student Answer: <strong style={{ color: ans.is_correct ? '#059669' : '#dc2626' }}>{ans.student_answer || 'None'}</strong>
+                                </div>
+                                {!ans.is_correct && ans.feedback && (
+                                    <div style={{ fontSize: '0.9rem', color: '#4b5563', marginTop: '8px', padding: '8px', backgroundColor: 'rgba(255,255,255,0.6)', borderRadius: '4px' }}>
+                                        <strong>AI Note:</strong> {ans.feedback}
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="banner-actions" style={{ marginTop: '24px', width: '100%', display: 'flex', gap: '12px' }}>
                         <button className="btn btn-primary" onClick={() => setResults(null)}>
                             Mark Another Script
                         </button>

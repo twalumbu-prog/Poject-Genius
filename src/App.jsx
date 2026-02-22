@@ -3,9 +3,7 @@ import { useAuth } from './hooks/useAuth';
 import ProtectedRoute from './components/ProtectedRoute';
 
 // Public pages
-import Landing from './pages/Landing';
-import Login from './pages/Login';
-import Signup from './pages/Signup';
+import AuthPage from './pages/AuthPage';
 
 // Teacher pages
 import TeacherOnboarding from './pages/teacher/Onboarding';
@@ -20,6 +18,7 @@ import MarkTest from './pages/teacher/MarkTest';
 import PupilAnalysis from './pages/teacher/PupilAnalysis';
 import AITestGenerator from './pages/teacher/AITestGenerator';
 import MarkingSchemeReview from './pages/teacher/MarkingSchemeReview';
+import StudentProfile from './pages/teacher/StudentProfile';
 
 // Admin pages
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -31,13 +30,18 @@ function App() {
     return (
       <div style={{
         display: 'flex',
+        flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
         height: '100vh',
-        fontSize: 'var(--font-size-lg)',
-        color: 'var(--color-text-secondary)'
+        gap: '1rem',
       }}>
-        Loading...
+        <div className="spinner"></div>
+        <span style={{
+          fontSize: 'var(--font-size-base)',
+          fontWeight: 'var(--font-weight-semibold)',
+          color: 'var(--color-accent-primary)',
+        }}>Loading...</span>
       </div>
     );
   }
@@ -45,10 +49,8 @@ function App() {
   return (
     <Router>
       <Routes>
-        {/* Public routes */}
-        <Route path="/" element={<Landing />} />
-        <Route path="/login/:role" element={<Login />} />
-        <Route path="/signup/:role" element={<Signup />} />
+        {/* Auth page is now the root */}
+        <Route path="/" element={<AuthPage />} />
 
         {/* Teacher routes */}
         <Route
@@ -125,6 +127,15 @@ function App() {
           element={
             <ProtectedRoute requiredRole="teacher">
               <PupilAnalysis />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/teacher/student/:pupilId"
+          element={
+            <ProtectedRoute requiredRole="teacher">
+              <StudentProfile />
             </ProtectedRoute>
           }
         />

@@ -9,6 +9,7 @@
 
 .page-header h1 {
     font-size: var(--font-size-3xl);
+    font-weight: var(--font-weight-extrabold);
     color: var(--color-text-primary);
 }
 
@@ -21,12 +22,14 @@
 }
 
 .empty-icon {
-    color: var(--color-text-tertiary);
+    color: var(--color-accent-primary);
     margin-bottom: var(--spacing-xl);
+    opacity: 0.5;
 }
 
 .empty-state h2 {
     font-size: var(--font-size-2xl);
+    font-weight: var(--font-weight-bold);
     margin-bottom: var(--spacing-md);
     color: var(--color-text-primary);
 }
@@ -34,6 +37,7 @@
 .empty-state p {
     color: var(--color-text-secondary);
     margin-bottom: var(--spacing-xl);
+    font-weight: var(--font-weight-medium);
 }
 
 .empty-actions {
@@ -51,7 +55,7 @@
     gap: var(--spacing-lg);
 }
 
-/* Floating Action Button */
+/* Floating Action Button - Duolingo Style */
 .fab-container {
     position: fixed;
     bottom: calc(var(--mobile-nav-height) + var(--spacing-lg));
@@ -60,27 +64,28 @@
 }
 
 .fab {
-    width: 56px;
-    height: 56px;
+    width: 60px;
+    height: 60px;
     border-radius: var(--radius-full);
-    background: linear-gradient(135deg, var(--color-accent-primary), var(--color-accent-secondary));
+    background-color: var(--color-success);
     color: white;
     border: none;
-    box-shadow: var(--shadow-lg);
+    box-shadow: 0 4px 0 var(--color-success-shadow);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all var(--transition-base);
+    transition: all var(--transition-fast);
 }
 
 .fab:hover {
-    transform: scale(1.1);
-    box-shadow: var(--shadow-xl);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 0 var(--color-success-shadow);
 }
 
 .fab:active {
-    transform: scale(0.95);
+    transform: translateY(3px);
+    box-shadow: 0 1px 0 var(--color-success-shadow);
 }
 
 .fab-menu {
@@ -88,10 +93,11 @@
     bottom: calc(100% + var(--spacing-md));
     right: 0;
     background: white;
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-xl);
+    border-radius: var(--radius-xl);
+    box-shadow: 0 8px 0 rgba(0, 0, 0, 0.04);
+    border: 2px solid var(--color-border-light);
     padding: var(--spacing-sm);
-    min-width: 200px;
+    min-width: 220px;
     animation: fadeInUp var(--transition-base);
 }
 
@@ -111,11 +117,11 @@
     width: 100%;
     text-align: left;
     padding: var(--spacing-md);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-lg);
     background: none;
     border: none;
     color: var(--color-text-primary);
-    font-weight: var(--font-weight-medium);
+    font-weight: var(--font-weight-semibold);
     display: flex;
     align-items: center;
     gap: var(--spacing-sm);
@@ -124,7 +130,8 @@
 }
 
 .fab-menu-item:hover {
-    background: var(--color-bg-tertiary);
+    background: var(--color-accent-light);
+    color: var(--color-accent-primary);
 }
 
 /* Coming Soon Page */
@@ -147,6 +154,7 @@
 
 .coming-soon-content h2 {
     font-size: var(--font-size-3xl);
+    font-weight: var(--font-weight-extrabold);
     margin-bottom: var(--spacing-sm);
 }
 
@@ -154,6 +162,7 @@
     color: var(--color-text-secondary);
     font-size: var(--font-size-lg);
     margin-bottom: var(--spacing-md);
+    font-weight: var(--font-weight-medium);
 }
 
 .coming-soon-content .description {

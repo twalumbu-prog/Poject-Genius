@@ -80,6 +80,7 @@ export default function MarkingSchemeReview() {
             options: ['', '', '', ''],
             correct_answer: '',
             topic: '',
+            difficulty: 'average',
             subtopic: '',
             learning_outcome: ''
         }]);
@@ -326,6 +327,28 @@ export default function MarkingSchemeReview() {
                                             className="input input-sm"
                                         />
                                     </div>
+                                    <div className="field-group">
+                                        <label>Difficulty</label>
+                                        <select
+                                            value={q.difficulty || 'average'}
+                                            onChange={(e) => handleQuestionChange(index, 'difficulty', e.target.value)}
+                                            className="input input-sm"
+                                        >
+                                            <option value="easy">Easy</option>
+                                            <option value="average">Average</option>
+                                            <option value="hard">Hard</option>
+                                        </select>
+                                    </div>
+                                    <div className="field-group flex-grow">
+                                        <label>Cognitive Level</label>
+                                        <input
+                                            type="text"
+                                            value={q.cognitive_level || ''}
+                                            onChange={(e) => handleQuestionChange(index, 'cognitive_level', e.target.value)}
+                                            placeholder="e.g. Analysis"
+                                            className="input input-sm"
+                                        />
+                                    </div>
                                     <div className="field-group flex-grow">
                                         <label>Learning Outcome</label>
                                         <input
@@ -334,6 +357,18 @@ export default function MarkingSchemeReview() {
                                             onChange={(e) => handleQuestionChange(index, 'learning_outcome', e.target.value)}
                                             placeholder="e.g. Solving linear equations"
                                             className="input input-sm"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="question-fields">
+                                    <div className="field-group full-width">
+                                        <label>Explanation / Rationale</label>
+                                        <textarea
+                                            value={q.explanation || ''}
+                                            onChange={(e) => handleQuestionChange(index, 'explanation', e.target.value)}
+                                            placeholder="Explain why the answer is correct..."
+                                            className="input input-sm"
+                                            rows={2}
                                         />
                                     </div>
                                 </div>

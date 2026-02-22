@@ -129,98 +129,73 @@ export default function AITestGenerator() {
         setLoading(true);
 
         try {
-            console.log('Generating test with AI (Batch Mode)...', formData);
+            console.log('Generating test with AI (Enhanced Mode)...', formData);
 
-            // 1. Prepare Batches to avoid huge payloads
-            const BATCH_SIZE = 5; // Conservative batch size to ensure high quality and no truncation
+            const MAX_CONCURRENCY = 3;
+            const OPTIMAL_BATCH_SIZE = 10;
+            const totalRequired = parseInt(formData.totalQuestions);
+
+            // 1. Prepare Batches
             let requestBatches = [];
-
             if (availableTopics.length > 0) {
                 // Topic Distribution Mode
                 let currentBatchTopics = [];
                 let currentBatchCount = 0;
-
-                // Deep copy to track remaining counts
-                let remainingTopics = formData.selectedTopics
-                    .filter(t => t.count > 0)
-                    .map(t => ({ ...t })); // Clone
+                let remainingTopics = formData.selectedTopics.filter(t => t.count > 0).map(t => ({ ...t }));
 
                 while (remainingTopics.length > 0) {
-                    let space = BATCH_SIZE - currentBatchCount;
-
+                    let space = OPTIMAL_BATCH_SIZE - currentBatchCount;
                     if (space <= 0) {
                         requestBatches.push(currentBatchTopics);
                         currentBatchTopics = [];
                         currentBatchCount = 0;
-                        space = BATCH_SIZE;
+                        space = OPTIMAL_BATCH_SIZE;
                     }
 
                     let topic = remainingTopics[0];
                     let take = Math.min(topic.count, space);
-
-                    // Add to current batch
                     currentBatchTopics.push({ ...topic, count: take });
                     currentBatchCount += take;
-
-                    // Decrement remaining
                     topic.count -= take;
-                    if (topic.count <= 0) {
-                        remainingTopics.shift();
-                    }
+                    if (topic.count <= 0) remainingTopics.shift();
                 }
-                // Add final batch
                 if (currentBatchTopics.length > 0) requestBatches.push(currentBatchTopics);
-
             } else {
                 // Manual Topic Mode
-                const total = parseInt(formData.totalQuestions);
-                let remaining = total;
+                let remaining = totalRequired;
                 while (remaining > 0) {
-                    const take = Math.min(remaining, BATCH_SIZE);
+                    const take = Math.min(remaining, OPTIMAL_BATCH_SIZE);
                     requestBatches.push({ count: take, manual: true });
                     remaining -= take;
                 }
             }
 
-            console.log(`Split into ${requestBatches.length} batches`, requestBatches);
-
-            // 2. Process Batches
+            // 2. Process Batches with Contextual Awareness
             let allQuestions = [];
-            let completedBatches = 0;
+            let completedQuestions = 0;
+            let existingQuestionTitles = [];
 
-            // Sequential processing with rate limiting
-            for (let i = 0; i < requestBatches.length; i++) {
-                const batch = requestBatches[i];
-                const isManual = batch.manual || false;
-
+            // Helper for individual batch execution
+            const runBatch = async (batch, batchIndex) => {
                 const payload = {
                     mode: 'generate_test',
                     testParams: {
                         subject: formData.subject,
                         grade: formData.grade,
-                        difficulty: formData.difficulty
+                        difficulty: formData.difficulty,
+                        existingQuestions: existingQuestionTitles // Pass current context
                     }
                 };
 
-                if (isManual) {
+                if (batch.manual) {
                     payload.testParams.topic = formData.topic;
                     payload.testParams.numQuestions = batch.count;
                 } else {
-                    payload.testParams.topics = batch; // This is the array of topics for this batch
+                    payload.testParams.topics = batch;
                 }
 
-                // Add delay between batches to respect rate limits (except for first batch)
-                if (i > 0) {
-                    console.log("Waiting 5 seconds for rate limit...");
-                    await new Promise(resolve => setTimeout(resolve, 5000));
-                }
-
-                // Retry logic for errors
                 let retries = 3;
-                let success = false;
-                let quotaRetries = 2; // Separate counter for quota errors
-
-                while (retries > 0 && !success) {
+                while (retries > 0) {
                     try {
                         const response = await fetch(
                             `https://gjiuseoqtzhdvxwvktfo.supabase.co/functions/v1/process-test-ai`,
@@ -236,74 +211,69 @@ export default function AITestGenerator() {
                         );
 
                         if (!response.ok) {
-                            const errData = await response.json().catch(() => ({}));
-
-                            // Handle 429 quota exceeded with proper retry delay
-                            if (response.status === 429 && quotaRetries > 0) {
-                                const retryAfter = errData.retry_after || 15;
-                                console.warn(`Quota exceeded. Retrying after ${retryAfter} seconds... (${quotaRetries} quota retries left)`);
-                                await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
-                                quotaRetries--;
-                                continue;
-                            }
-
-                            // Handle 500/503 with standard retry
-                            if (response.status === 500 || response.status === 503) {
-                                console.warn(`Batch failed with ${response.status}. Retrying... (${retries} left)`);
-                                await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10s on error
-                                retries--;
-                                if (retries === 0) {
-                                    throw new Error(errData.error?.message || errData.message || `Batch failed: ${response.status}`);
+                            let errMessage = `Batch failed: ${response.status}`;
+                            try {
+                                const errData = await response.json();
+                                if (response.status === 429) {
+                                    await new Promise(r => setTimeout(r, (errData.retry_after || 15) * 1000));
+                                    continue;
                                 }
-                                continue;
+                                errMessage = `Error ${response.status}: ${errData.message || errData.error || JSON.stringify(errData)}`;
+                            } catch (parseError) {
+                                // If not JSON, it might throwing a generic HTML page or something
+                                errMessage = `Error ${response.status}: Failed to parse error response from backend.`;
                             }
-
-                            // Other errors - fail immediately
-                            throw new Error(errData.error?.message || errData.message || `Batch failed: ${response.status}`);
+                            throw new Error(errMessage);
                         }
 
-                        const aiData = await response.json();
+                        const data = await response.json();
+                        const newQuestions = data.questions || [];
 
-                        if (aiData.questions && Array.isArray(aiData.questions)) {
-                            allQuestions = [...allQuestions, ...aiData.questions];
-                        }
-                        success = true;
+                        // Update context for variety
+                        existingQuestionTitles = [...existingQuestionTitles, ...newQuestions.map(q => q.question_text).slice(0, 10)];
 
-                        completedBatches++;
-                        // Update progress visually
-                        setGenPhase(Math.min(4, Math.floor((completedBatches / requestBatches.length) * 4)));
-
+                        return newQuestions;
                     } catch (err) {
-                        console.error("Batch attempt failed:", err);
-                        if (retries <= 1 && quotaRetries <= 0) throw err; // Throw on last retry
-                        if (retries > 1) {
-                            await new Promise(resolve => setTimeout(resolve, 10000));
-                            retries--;
-                        } else {
-                            throw err;
-                        }
+                        retries--;
+                        if (retries === 0) throw err;
+                        await new Promise(r => setTimeout(r, 5000));
                     }
+                }
+            };
+
+            // Execution Strategy: 
+            // - If small test: Run all in parallel (max concurrency)
+            // - If large test: Run in chunks to build context
+            if (requestBatches.length <= MAX_CONCURRENCY) {
+                const results = await Promise.all(requestBatches.map((b, i) => runBatch(b, i)));
+                allQuestions = results.flat();
+            } else {
+                // Large test: Process in groups of concurrency limit to pass context forward
+                for (let i = 0; i < requestBatches.length; i += MAX_CONCURRENCY) {
+                    const currentGroup = requestBatches.slice(i, i + MAX_CONCURRENCY);
+                    const groupResults = await Promise.all(currentGroup.map((b, idx) => runBatch(b, i + idx)));
+                    allQuestions = [...allQuestions, ...groupResults.flat()];
+
+                    // Update progress
+                    setGenPhase(Math.min(4, Math.floor((allQuestions.length / totalRequired) * 4)));
                 }
             }
 
-            // 3. Post-process Questions (Re-numbering)
-            const finalQuestions = allQuestions.map((q, index) => ({
+            // 3. Post-process and Save
+            const finalQuestions = allQuestions.slice(0, totalRequired).map((q, index) => ({
                 ...q,
                 question_number: index + 1
             }));
 
-            // Build topic summary from ORIGINAL distribution (what user asked for)
             const topicSummary = {};
             if (availableTopics.length > 0) {
-                formData.selectedTopics.forEach(t => {
-                    topicSummary[t.name] = t.count;
-                });
+                formData.selectedTopics.forEach(t => topicSummary[t.name] = t.count);
             } else {
                 topicSummary[formData.topic] = formData.totalQuestions;
             }
 
-            // 4. Save to DB
             if (!user) throw new Error("User session not found");
+
             const { data: test, error: testError } = await supabase
                 .from('tests')
                 .insert({

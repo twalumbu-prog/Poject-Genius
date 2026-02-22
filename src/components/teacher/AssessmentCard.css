@@ -1,14 +1,15 @@
 .assessment-card {
     background-color: var(--color-bg-secondary);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-xl);
     padding: var(--spacing-lg);
-    box-shadow: var(--shadow-sm);
-    border: 1px solid var(--color-border-light);
+    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.04);
+    border: 2px solid var(--color-border-light);
     transition: all var(--transition-base);
 }
 
 .assessment-card:hover {
-    box-shadow: var(--shadow-md);
+    box-shadow: 0 6px 0 rgba(0, 0, 0, 0.06);
+    transform: translateY(-2px);
 }
 
 .test-card {
@@ -16,7 +17,8 @@
 }
 
 .test-card:active {
-    transform: scale(0.98);
+    transform: translateY(2px);
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
 }
 
 .card-header {
@@ -36,7 +38,7 @@
 
 .card-title h3 {
     font-size: var(--font-size-lg);
-    font-weight: var(--font-weight-semibold);
+    font-weight: var(--font-weight-bold);
     color: var(--color-text-primary);
     margin-bottom: var(--spacing-xs);
 }
@@ -45,6 +47,7 @@
     font-size: var(--font-size-sm);
     color: var(--color-text-secondary);
     margin: 0;
+    font-weight: var(--font-weight-medium);
 }
 
 .card-actions {
@@ -54,28 +57,30 @@
     color: var(--color-text-tertiary);
 }
 
-/* Progress Bar */
+/* Progress Bar - Duolingo Style */
 .progress-bar {
     width: 100%;
-    height: 4px;
+    height: 10px;
     background-color: var(--color-bg-tertiary);
     border-radius: var(--radius-full);
     margin-top: var(--spacing-md);
     overflow: hidden;
+    border: 1px solid var(--color-border-light);
 }
 
 .progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, var(--color-accent-primary), var(--color-accent-secondary));
+    background: linear-gradient(90deg, var(--color-success), var(--color-success));
     transition: width var(--transition-slow);
     border-radius: var(--radius-full);
+    box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.1);
 }
 
 /* Stream Tests */
 .stream-tests {
     margin-top: var(--spacing-lg);
     padding-top: var(--spacing-md);
-    border-top: 1px solid var(--color-border-light);
+    border-top: 2px solid var(--color-border-light);
     display: flex;
     flex-direction: column;
     gap: var(--spacing-sm);
@@ -86,14 +91,16 @@
     align-items: center;
     justify-content: space-between;
     padding: var(--spacing-md);
-    border-radius: var(--radius-md);
-    background-color: var(--color-bg-tertiary);
+    border-radius: var(--radius-lg);
+    background-color: var(--color-bg-primary);
     cursor: pointer;
     transition: all var(--transition-fast);
+    border: 2px solid transparent;
 }
 
 .test-item:hover {
     background-color: var(--color-accent-light);
+    border-color: var(--color-accent-primary);
 }
 
 .test-item:active {
@@ -102,7 +109,7 @@
 
 .test-info h4 {
     font-size: var(--font-size-base);
-    font-weight: var(--font-weight-medium);
+    font-weight: var(--font-weight-semibold);
     color: var(--color-text-primary);
     margin-bottom: var(--spacing-xs);
 }
@@ -111,6 +118,7 @@
     font-size: var(--font-size-sm);
     color: var(--color-text-secondary);
     margin: 0;
+    font-weight: var(--font-weight-medium);
 }
 
 .test-badge {

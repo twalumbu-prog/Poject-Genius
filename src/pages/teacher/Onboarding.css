@@ -3,8 +3,21 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: var(--color-bg-primary);
     padding: var(--spacing-xl) var(--spacing-lg);
+    position: relative;
+}
+
+/* Colorful top bar */
+.onboarding-page::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 6px;
+    background: linear-gradient(90deg, var(--color-success), var(--color-accent-primary), var(--color-warning));
+    border-radius: 0 0 var(--radius-full) var(--radius-full);
 }
 
 .onboarding-container {
@@ -13,7 +26,8 @@
     background: white;
     border-radius: var(--radius-xl);
     padding: var(--spacing-2xl);
-    box-shadow: var(--shadow-xl);
+    box-shadow: 0 8px 0 rgba(0, 0, 0, 0.04);
+    border: 2px solid var(--color-border-light);
 }
 
 .onboarding-header {
@@ -23,6 +37,7 @@
 
 .onboarding-header h1 {
     font-size: var(--font-size-3xl);
+    font-weight: var(--font-weight-extrabold);
     margin-bottom: var(--spacing-sm);
     color: var(--color-text-primary);
 }
@@ -30,6 +45,7 @@
 .onboarding-header p {
     color: var(--color-text-secondary);
     margin-bottom: 0;
+    font-weight: var(--font-weight-medium);
 }
 
 .onboarding-form {
@@ -53,24 +69,33 @@
 .grade-button {
     padding: var(--spacing-md);
     border: 2px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-lg);
     background: white;
     color: var(--color-text-secondary);
     font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-medium);
+    font-weight: var(--font-weight-semibold);
     cursor: pointer;
     transition: all var(--transition-fast);
+    box-shadow: 0 3px 0 var(--color-border);
 }
 
 .grade-button:hover {
     border-color: var(--color-accent-primary);
     background-color: var(--color-accent-light);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 0 var(--color-accent-shadow);
+}
+
+.grade-button:active {
+    transform: translateY(2px);
+    box-shadow: 0 1px 0 var(--color-border);
 }
 
 .grade-button.active {
     border-color: var(--color-accent-primary);
     background-color: var(--color-accent-primary);
     color: white;
+    box-shadow: 0 3px 0 var(--color-accent-shadow);
 }
 
 .emoji-grid {
@@ -83,21 +108,29 @@
     padding: var(--spacing-md);
     font-size: var(--font-size-2xl);
     border: 2px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-lg);
     background: white;
     cursor: pointer;
     transition: all var(--transition-fast);
+    box-shadow: 0 3px 0 var(--color-border);
 }
 
 .emoji-button:hover {
     border-color: var(--color-accent-primary);
-    transform: scale(1.1);
+    transform: translateY(-2px) scale(1.1);
+    box-shadow: 0 5px 0 var(--color-accent-shadow);
+}
+
+.emoji-button:active {
+    transform: translateY(2px) scale(1.05);
+    box-shadow: 0 1px 0 var(--color-border);
 }
 
 .emoji-button.active {
     border-color: var(--color-accent-primary);
     background-color: var(--color-accent-light);
     transform: scale(1.1);
+    box-shadow: 0 3px 0 var(--color-accent-shadow);
 }
 
 .btn-large {
