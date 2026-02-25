@@ -20,6 +20,7 @@ import AITestGenerator from './pages/teacher/AITestGenerator';
 import MarkingSchemeReview from './pages/teacher/MarkingSchemeReview';
 import StudentProfile from './pages/teacher/StudentProfile';
 import ReportCardView from './pages/teacher/ReportCardView';
+import ArchivedAssessments from './pages/teacher/ArchivedAssessments';
 
 // Admin pages
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -72,6 +73,7 @@ function App() {
         >
           <Route index element={<Navigate to="/teacher/assessments" replace />} />
           <Route path="assessments" element={<Assessments />} />
+          <Route path="archived-assessments" element={<ArchivedAssessments />} />
           <Route path="students" element={<Students />} />
           <Route path="analysis" element={<Analysis />} />
         </Route>

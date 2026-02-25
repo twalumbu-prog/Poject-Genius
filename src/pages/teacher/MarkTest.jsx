@@ -14,10 +14,27 @@ export default function MarkTest() {
     const [processingStatus, setProcessingStatus] = useState('');
     const [results, setResults] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [pupils, setPupils] = useState([]);
+    const [reviewData, setReviewData] = useState(null);
+    const [scannedImage, setScannedImage] = useState(null);
 
     useEffect(() => {
         fetchTestData();
+        fetchPupils();
     }, [testId]);
+
+    async function fetchPupils() {
+        try {
+            const { data, error } = await supabase
+                .from('pupils')
+                .select('*')
+                .order('name');
+            if (error) throw error;
+            setPupils(data);
+        } catch (error) {
+            console.error('Error fetching pupils:', error);
+        }
+    }
 
     async function fetchTestData() {
         try {
@@ -76,12 +93,45 @@ export default function MarkTest() {
 
             const { studentName, answers: studentAnswers } = data;
 
-            // 2. Calculate Stats
+            setScannedImage(base64Image);
+            setReviewData({
+                studentName: studentName || '',
+                studentAnswers: markingScheme.questions.map(q => {
+                    const aiAns = studentAnswers.find(a => a.question_number === q.question_number);
+                    return {
+                        question_number: q.question_number,
+                        student_answer: aiAns?.student_answer || '',
+                        is_correct: aiAns ? aiAns.is_correct : false,
+                        feedback: aiAns?.feedback || (aiAns ? '' : 'Missing from extraction'),
+                        confidence: aiAns?.confidence || 'Low',
+                        topic: q.topic
+                    };
+                })
+            });
+        } catch (error) {
+            console.error('AI Processing Error:', error);
+            alert(`AI Marking failed: ${error.message}`);
+        } finally {
+            setIsProcessing(false);
+            setProcessingStatus('');
+        }
+    };
+
+    const handleSaveResult = async () => {
+        if (!reviewData) return;
+
+        try {
+            setIsProcessing(true);
+            setProcessingStatus('Saving results...');
+
+            const { studentName, studentAnswers } = reviewData;
+
+            // 1. Calculate Stats
             const correctCount = studentAnswers.filter(a => a.is_correct).length;
             const score = correctCount;
             const percentage = (correctCount / markingScheme.questions.length) * 100;
 
-            // 3. Save or Get Pupil
+            // 2. Save or Get Pupil
             let pupilId;
             const { data: existingPupil } = await supabase
                 .from('pupils')
@@ -101,7 +151,7 @@ export default function MarkTest() {
                 pupilId = newPupil.id;
             }
 
-            // 4. Save Result
+            // 3. Save Result
             const { data: result, error: resError } = await supabase
                 .from('results')
                 .upsert({
@@ -116,7 +166,7 @@ export default function MarkTest() {
 
             if (resError) throw resError;
 
-            // 5. Generate Topic Analysis
+            // 4. Generate Topic Analysis
             const topicPerformance = {};
             markingScheme.questions.forEach(q => {
                 if (!topicPerformance[q.topic]) {
@@ -164,14 +214,31 @@ export default function MarkTest() {
             if (analysisError) throw analysisError;
 
             setResults({ studentName, score, percentage, correctCount, studentAnswers });
-            alert(`Successfully marked script for ${studentName}! Score: ${correctCount}/${markingScheme.questions.length}`);
+            setReviewData(null);
         } catch (error) {
-            console.error('AI Processing Error:', error);
-            alert(`AI Marking failed: ${error.message}`);
+            console.error('Error saving result:', error);
+            alert(`Error saving: ${error.message}`);
         } finally {
             setIsProcessing(false);
             setProcessingStatus('');
         }
+    };
+
+    const updateReviewAnswer = (index, field, value) => {
+        const newAnswers = [...reviewData.studentAnswers];
+        const updatedAns = { ...newAnswers[index], [field]: value };
+
+        // Re-evaluate correctness if student_answer changed
+        if (field === 'student_answer') {
+            const questionNumber = updatedAns.question_number;
+            const originalQ = markingScheme.questions.find(q => q.question_number === questionNumber);
+            if (originalQ) {
+                updatedAns.is_correct = value.trim().toUpperCase() === originalQ.correct_answer.trim().toUpperCase();
+            }
+        }
+
+        newAnswers[index] = updatedAns;
+        setReviewData({ ...reviewData, studentAnswers: newAnswers });
     };
 
     const triggerFileUpload = () => {
@@ -213,9 +280,12 @@ export default function MarkTest() {
             <div className="page-header">
                 <h1>Mark {test.subject}</h1>
                 <p className="subtitle">Upload student scripts for automatic marking</p>
+                <datalist id="pupil-list">
+                    {pupils.map(p => <option key={p.id} value={p.name} />)}
+                </datalist>
             </div>
 
-            {!results ? (
+            {!reviewData && !results && (
                 <div className="mark-options">
                     <div className="mark-option-card" onClick={triggerFileUpload}>
                         <div className="option-icon">
@@ -225,7 +295,73 @@ export default function MarkTest() {
                         <p>Take a photo or upload a scanned student answer sheet</p>
                     </div>
                 </div>
-            ) : (
+            )}
+
+            {reviewData && !results && (
+                <div className="review-interface">
+                    <div className="review-header">
+                        <h2>Review Extraction</h2>
+                        <div className="review-actions">
+                            <button className="btn btn-secondary" onClick={() => setReviewData(null)}>Cancel</button>
+                            <button className="btn btn-primary" onClick={handleSaveResult}>Confirm & Save Result</button>
+                        </div>
+                    </div>
+
+                    <div className="review-content">
+                        <div className="review-image-pane">
+                            <h3>Scanned Script</h3>
+                            <div className="image-container">
+                                <img src={scannedImage} alt="Scanned Script" />
+                            </div>
+                        </div>
+
+                        <div className="review-data-pane">
+                            <div className="student-info-review">
+                                <label>Student Name</label>
+                                <input
+                                    type="text"
+                                    list="pupil-list"
+                                    value={reviewData.studentName}
+                                    onChange={(e) => setReviewData({ ...reviewData, studentName: e.target.value })}
+                                    placeholder="Enter or select student name"
+                                    className="student-name-input"
+                                />
+                            </div>
+
+                            <h3>Answer Verification</h3>
+                            <div className="review-answers-list">
+                                {reviewData.studentAnswers.map((ans, idx) => (
+                                    <div key={idx} className={`review-item ${ans.confidence === 'Low' || !ans.student_answer ? 'review-warning' : ''}`}>
+                                        <div className="review-item-header">
+                                            <span className="q-circle">Q{ans.question_number}</span>
+                                            <span className={`status-badge ${ans.is_correct ? 'correct' : 'incorrect'}`}>
+                                                {ans.is_correct ? 'Correct' : 'Incorrect'}
+                                            </span>
+                                        </div>
+                                        <div className="review-item-body">
+                                            <div className="field-group">
+                                                <label>Extracted Answer</label>
+                                                <input
+                                                    type="text"
+                                                    value={ans.student_answer}
+                                                    onChange={(e) => updateReviewAnswer(idx, 'student_answer', e.target.value)}
+                                                />
+                                            </div>
+                                            {ans.feedback && (
+                                                <div className="review-note">
+                                                    <strong>AI Note:</strong> {ans.feedback}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {results && (
                 <div className="success-banner-large" style={{ textAlign: "left", alignItems: "flex-start" }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
                         <CheckCircle size={48} className="icon-success" />

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { supabase } from '../../lib/supabase';
-import { Plus, FileText, Sparkles } from 'lucide-react';
+import { Plus, FileText, Sparkles, Archive } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import AssessmentCard from '../../components/teacher/AssessmentCard';
 import './Assessments.css';
@@ -29,6 +29,7 @@ export default function Assessments() {
           tests (*)
         `)
                 .eq('teacher_id', user.id)
+                .eq('is_archived', false)
                 .order('created_at', { ascending: false });
 
             if (streamError) throw streamError;
@@ -39,6 +40,7 @@ export default function Assessments() {
                 .select('*')
                 .eq('teacher_id', user.id)
                 .is('test_stream_id', null)
+                .eq('is_archived', false)
                 .order('created_at', { ascending: false });
 
             if (standaloneError) throw standaloneError;
@@ -77,6 +79,13 @@ export default function Assessments() {
         <div className="assessments-page">
             <div className="page-header">
                 <h1>Assessments</h1>
+                <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => navigate('/teacher/archived-assessments')}
+                >
+                    <Archive size={16} />
+                    Archived Tests
+                </button>
             </div>
 
             {!hasAssessments ? (
@@ -101,10 +110,10 @@ export default function Assessments() {
                 <>
                     <div className="assessments-list">
                         {testStreams.map((stream) => (
-                            <AssessmentCard key={stream.id} stream={stream} />
+                            <AssessmentCard key={stream.id} stream={stream} onAction={fetchAssessments} />
                         ))}
                         {standaloneTests.map((test) => (
-                            <AssessmentCard key={test.id} test={test} />
+                            <AssessmentCard key={test.id} test={test} onAction={fetchAssessments} />
                         ))}
                     </div>
 
