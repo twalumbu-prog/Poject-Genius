@@ -147,8 +147,8 @@ export default function MarkingSchemeReview() {
                             question_text: q.question_text,
                             options: q.options
                         })),
-                        geminiKey: import.meta.env.VITE_GEMINI_API_KEY
-                    }
+                    },
+                    geminiKey: import.meta.env.VITE_GEMINI_API_KEY
                 }
             });
 
