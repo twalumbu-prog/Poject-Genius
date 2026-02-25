@@ -616,33 +616,36 @@
 
 .review-data-pane {
     display: flex;
-    flex-direction: column;
-    gap: var(--spacing-xl);
-}
-
-.student-info-review {
-    background: white;
-    padding: var(--spacing-lg);
-    border-radius: var(--radius-lg);
-    border: 2px solid var(--color-border-light);
-    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.02);
+    gap: var(--spacing-md);
 }
 
 .student-info-review label {
     display: block;
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-xs);
     font-weight: var(--font-weight-bold);
-    color: var(--color-text-secondary);
-    margin-bottom: var(--spacing-xs);
+    color: var(--color-text-tertiary);
     text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 4px;
+}
+
+.student-info-review input {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-base);
+    font-family: inherit;
+    transition: all 0.2s;
+}
+
+.student-info-review input:focus {
+    outline: none;
+    border-color: var(--color-accent-primary);
+    box-shadow: 0 0 0 3px var(--color-accent-light);
 }
 
 .student-name-input {
-    width: 100%;
-    padding: var(--spacing-md);
-    border: 2px solid var(--color-border);
-    border-radius: var(--radius-md);
-    font-size: var(--font-size-lg);
     font-weight: var(--font-weight-bold);
     color: var(--color-text-primary);
 }

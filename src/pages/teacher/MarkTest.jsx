@@ -147,7 +147,7 @@ export default function MarkTest() {
             setIsProcessing(true);
             setProcessingStatus('Saving results...');
 
-            const { studentName, studentAnswers } = reviewData;
+            const { studentName, studentId, grade, studentAnswers } = reviewData;
 
             // 1. Calculate Stats
             const correctCount = studentAnswers.filter(a => a.is_correct).length;
@@ -158,16 +158,20 @@ export default function MarkTest() {
             let pupilId;
             const { data: existingPupil } = await supabase
                 .from('pupils')
-                .select('id')
-                .eq('name', studentName)
+                .select('id, grade, student_id')
+                .or(`name.eq."${studentName}",student_id.eq."${studentId}"`)
                 .maybeSingle();
 
             if (existingPupil) {
                 pupilId = existingPupil.id;
+                // Update grade or ID if they were missing or changed
+                if (existingPupil.grade !== grade || existingPupil.student_id !== studentId) {
+                    await supabase.from('pupils').update({ grade, student_id: studentId }).eq('id', pupilId);
+                }
             } else {
                 const { data: newPupil, error: pError } = await supabase
                     .from('pupils')
-                    .insert({ name: studentName })
+                    .insert({ name: studentName, grade, student_id: studentId })
                     .select()
                     .single();
                 if (pError) throw pError;
@@ -399,6 +403,8 @@ export default function MarkTest() {
                                     setScannedImage(filteredBase64);
                                     setReviewData({
                                         studentName: data.studentName || '',
+                                        studentId: data.student_id || '',
+                                        grade: data.grade || '',
                                         studentAnswers: markingScheme.questions.map(q => {
                                             const aiAns = data.answers.find(a => a.question_number === q.question_number);
                                             return {
@@ -480,15 +486,37 @@ export default function MarkTest() {
 
                         <div className="review-data-pane">
                             <div className="student-info-review">
-                                <label>Student Name</label>
-                                <input
-                                    type="text"
-                                    list="pupil-list"
-                                    value={reviewData.studentName}
-                                    onChange={(e) => setReviewData({ ...reviewData, studentName: e.target.value })}
-                                    placeholder="Enter student name"
-                                    className="student-name-input"
-                                />
+                                <div className="field-group">
+                                    <label>Student Name</label>
+                                    <input
+                                        type="text"
+                                        list="pupil-list"
+                                        value={reviewData.studentName}
+                                        onChange={(e) => setReviewData({ ...reviewData, studentName: e.target.value })}
+                                        placeholder="Enter student name"
+                                        className="student-name-input"
+                                    />
+                                </div>
+                                <div className="info-grid">
+                                    <div className="field-group">
+                                        <label>Student ID</label>
+                                        <input
+                                            type="text"
+                                            value={reviewData.studentId}
+                                            onChange={(e) => setReviewData({ ...reviewData, studentId: e.target.value })}
+                                            placeholder="Extracted ID"
+                                        />
+                                    </div>
+                                    <div className="field-group">
+                                        <label>Grade</label>
+                                        <input
+                                            type="text"
+                                            value={reviewData.grade}
+                                            onChange={(e) => setReviewData({ ...reviewData, grade: e.target.value })}
+                                            placeholder="Extracted Grade"
+                                        />
+                                    </div>
+                                </div>
                             </div>
 
                             <h3>Verification</h3>

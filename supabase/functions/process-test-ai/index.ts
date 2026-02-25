@@ -375,6 +375,8 @@ CRITICAL INSTRUCTIONS:
 Response Schema:
 {
   "studentName": "string",
+  "student_id": "string (the student ID or index number handwritten on the sheet)",
+  "grade": "string (the grade level handwritten on the sheet, e.g. Grade 8)",
   "answers": [
     {
       "question_number": number,

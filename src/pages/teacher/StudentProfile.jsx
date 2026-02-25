@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { ArrowLeft, ChevronDown, ChevronRight, ChevronUp, FileText } from 'lucide-react';
+import { SYLLABUS_DATA } from '../../data/ecz_syllabus';
 import PerformanceGraph from '../../components/teacher/PerformanceGraph';
 import ReportCardModal from '../../components/teacher/ReportCardModal';
 import './StudentProfile.css';
@@ -12,6 +13,7 @@ const STATUS_CONFIG = {
     average: { label: 'Average', className: 'status-average' },
     weak: { label: 'Weak', className: 'status-weak' },
     struggling: { label: 'Struggling', className: 'status-struggling' },
+    unattempted: { label: 'Unattempted', className: 'status-unattempted' },
 };
 
 function getTopicStatus(avgPercentage) {
@@ -49,6 +51,23 @@ export default function StudentProfile() {
                 .eq('id', pupilId)
                 .single();
             if (pupilError) throw pupilError;
+
+            // Initialize grouped data from syllabus if grade is known
+            const grouped = {};
+            const syllabusSubjects = [];
+
+            if (pupilData.grade) {
+                Object.entries(SYLLABUS_DATA).forEach(([subject, grades]) => {
+                    const gradeTopics = grades[pupilData.grade];
+                    if (gradeTopics) {
+                        syllabusSubjects.push(subject);
+                        grouped[subject] = {};
+                        gradeTopics.forEach(topic => {
+                            grouped[subject][topic.name] = [];
+                        });
+                    }
+                });
+            }
 
             // Fetch all results for this pupil, joining test info
             const { data: resultsData, error: resultsError } = await supabase
@@ -89,13 +108,13 @@ export default function StudentProfile() {
             });
 
             // Group by subject -> topic -> [{ percentage, date, testTitle }]
-            const grouped = {};
             topicRows.forEach(ta => {
                 const result = resultMap[ta.result_id];
                 if (!result || !result.tests) return;
                 const subject = result.tests.subject;
                 const topic = ta.topic;
 
+                // Ensure subject and topic exist (even if not in current grade syllabus)
                 if (!grouped[subject]) grouped[subject] = {};
                 if (!grouped[subject][topic]) grouped[subject][topic] = [];
 
@@ -114,12 +133,13 @@ export default function StudentProfile() {
                 });
             });
 
-            const subjectList = Object.keys(grouped).sort();
+            // Get final subject list (Syllabus subjects first, then others)
+            const allSubjects = Array.from(new Set([...syllabusSubjects, ...Object.keys(grouped)])).sort();
 
             setPupil(pupilData);
             setSubjectData(grouped);
-            setSubjects(subjectList);
-            setActiveSubject(subjectList[0] || null);
+            setSubjects(allSubjects);
+            setActiveSubject(allSubjects[0] || null);
         } catch (error) {
             console.error('Error fetching student profile:', error);
         } finally {
@@ -244,24 +264,28 @@ export default function StudentProfile() {
 
             <div className="topics-accordion">
                 {topicEntries.map(([topicName, attempts]) => {
-                    const avg = Math.round(attempts.reduce((s, a) => s + a.percentage, 0) / attempts.length);
-                    const status = getTopicStatus(avg);
+                    const hasAttempts = attempts && attempts.length > 0;
+                    const avg = hasAttempts
+                        ? Math.round(attempts.reduce((s, a) => s + a.percentage, 0) / attempts.length)
+                        : 0;
+                    const status = hasAttempts ? getTopicStatus(avg) : 'unattempted';
                     const config = STATUS_CONFIG[status];
-                    const isOpen = expandedTopic === topicName;
+                    const isOpen = expandedTopic === topicName && hasAttempts;
 
                     return (
-                        <div key={topicName} className={`topic-accordion-card ${isOpen ? 'open' : ''}`}>
+                        <div key={topicName} className={`topic-accordion-card ${isOpen ? 'open' : ''} ${!hasAttempts ? 'unattempted' : ''}`}>
                             <button
                                 className="topic-accordion-header"
-                                onClick={() => setExpandedTopic(isOpen ? null : topicName)}
+                                onClick={() => hasAttempts && setExpandedTopic(isOpen ? null : topicName)}
+                                style={{ cursor: hasAttempts ? 'pointer' : 'default' }}
                             >
                                 <span className="topic-accordion-name">{topicName}</span>
                                 <span className={`topic-status-badge ${config.className}`}>
                                     {config.label}
                                 </span>
-                                {isOpen ? <ChevronUp size={20} /> : <ChevronRight size={20} />}
+                                {hasAttempts && (isOpen ? <ChevronUp size={20} /> : <ChevronRight size={20} />)}
                             </button>
-                            {isOpen && (
+                            {isOpen && hasAttempts && (
                                 <div className="topic-accordion-body">
                                     <PerformanceGraph attempts={attempts} />
                                 </div>

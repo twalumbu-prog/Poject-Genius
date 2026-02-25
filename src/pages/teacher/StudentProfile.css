@@ -294,8 +294,15 @@
 }
 
 .status-struggling {
-    background: rgba(153, 27, 27, 0.1);
-    color: #991b1b;
+    background: #fef2f2;
+    color: #ef4444;
+    border-color: #fee2e2;
+}
+
+.status-unattempted {
+    background: #f3f4f6;
+    color: #6b7280;
+    border-color: #e5e7eb;
 }
 
 /* ========= ACCORDION BODY ========= */
