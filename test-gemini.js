@@ -1,5 +1,5 @@
 // Test Gemini API
-const GEMINI_API_KEY = "AIzaSyD1LkkxKx25hvLMQh8Nq6BWb-CPakJ-Cx4";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "AIzaSyCgX-r4ssCAJMvkx9YcWGleQFgrdCjI6YA";
 
 async function testGemini() {
     try {

@@ -1,0 +1,512 @@
+[
+  {
+    "question_text": "What is the place value of the digit 7 in the number 478,215?",
+    "type": "multiple_choice",
+    "options": [
+      "Thousands",
+      "Hundreds",
+      "Ten Thousands",
+      "Hundred Thousands"
+    ],
+    "correct_answer": "Ten Thousands",
+    "marks": 1,
+    "topic": "Whole Numbers",
+    "cognitive_level": "Knowledge",
+    "difficulty_score": 3,
+    "explanation": "In the number 478,215, the digit 5 is in units, 1 is in tens, 2 is in hundreds, 8 is in thousands, and 7 is in ten thousands.",
+    "question_number": 1
+  },
+  {
+    "question_text": "Work out the value of 1/4 + 3/8.",
+    "type": "multiple_choice",
+    "options": [
+      "4/12",
+      "1/2",
+      "5/8",
+      "4/8"
+    ],
+    "correct_answer": "5/8",
+    "marks": 2,
+    "topic": "Fractions",
+    "cognitive_level": "Application",
+    "difficulty_score": 5,
+    "explanation": "To add fractions with different denominators, find a common denominator. 1/4 is equal to 2/8. Therefore, 2/8 + 3/8 = 5/8.",
+    "question_number": 2
+  },
+  {
+    "question_text": "Calculate the product of 0.5 and 0.2.",
+    "type": "multiple_choice",
+    "options": [
+      "0.1",
+      "0.01",
+      "1.0",
+      "0.001"
+    ],
+    "correct_answer": "0.1",
+    "marks": 1,
+    "topic": "Decimals",
+    "cognitive_level": "Application",
+    "difficulty_score": 4,
+    "explanation": "When multiplying decimals, multiply as whole numbers (5 x 2 = 10) and then place the decimal point by counting total decimal places in the factors (1+1=2). 10 becomes 0.10, which is 0.1.",
+    "question_number": 3
+  },
+  {
+    "question_text": "What is the sum of interior angles on a straight line?",
+    "type": "multiple_choice",
+    "options": [
+      "90°",
+      "180°",
+      "270°",
+      "360°"
+    ],
+    "correct_answer": "180°",
+    "marks": 1,
+    "topic": "Geometry",
+    "cognitive_level": "Knowledge",
+    "difficulty_score": 2,
+    "explanation": "By definition, angles on a straight line always add up to 180 degrees.",
+    "question_number": 4
+  },
+  {
+    "question_text": "Simplify the algebraic expression: 4x + 2y - x + 3y",
+    "type": "multiple_choice",
+    "options": [
+      "3x + 5y",
+      "5x + 5y",
+      "3x - y",
+      "4x + 5y"
+    ],
+    "correct_answer": "3x + 5y",
+    "marks": 2,
+    "topic": "Algebra",
+    "cognitive_level": "Analysis",
+    "difficulty_score": 6,
+    "explanation": "Group like terms together: (4x - x) + (2y + 3y). This simplifies to 3x + 5y.",
+    "question_number": 5
+  },
+  {
+    "question_text": "Find the value of 25 multiplied by 12.",
+    "type": "multiple_choice",
+    "options": [
+      "250",
+      "300",
+      "350",
+      "400"
+    ],
+    "correct_answer": "300",
+    "marks": 1,
+    "topic": "Whole Numbers",
+    "cognitive_level": "Application",
+    "difficulty_score": 4,
+    "explanation": "Multiplying 25 by 10 gives 250, and 25 by 2 gives 50. Adding them results in 300.",
+    "question_number": 6
+  },
+  {
+    "question_text": "Divide 3/4 by 1/2.",
+    "type": "multiple_choice",
+    "options": [
+      "3/8",
+      "1 1/2",
+      "1/2",
+      "4/3"
+    ],
+    "correct_answer": "1 1/2",
+    "marks": 2,
+    "topic": "Fractions",
+    "cognitive_level": "Application",
+    "difficulty_score": 6,
+    "explanation": "To divide by a fraction, multiply by its reciprocal. 3/4 * 2/1 = 6/4. Simplified, this is 3/2 or 1 1/2.",
+    "question_number": 7
+  },
+  {
+    "question_text": "A rectangular garden has a length of 8 meters and a width of 5 meters. What is its perimeter?",
+    "type": "multiple_choice",
+    "options": [
+      "13m",
+      "26m",
+      "40m",
+      "20m"
+    ],
+    "correct_answer": "26m",
+    "marks": 2,
+    "topic": "Geometry",
+    "cognitive_level": "Application",
+    "difficulty_score": 5,
+    "explanation": "The formula for perimeter is 2(length + width). 2(8 + 5) = 2(13) = 26 meters.",
+    "question_number": 8
+  },
+  {
+    "question_text": "Solve for x in the equation: x + 15 = 42",
+    "type": "multiple_choice",
+    "options": [
+      "27",
+      "57",
+      "25",
+      "37"
+    ],
+    "correct_answer": "27",
+    "marks": 1,
+    "topic": "Algebra",
+    "cognitive_level": "Application",
+    "difficulty_score": 4,
+    "explanation": "To find x, subtract 15 from both sides: 42 - 15 = 27.",
+    "question_number": 9
+  },
+  {
+    "question_text": "Calculate 10.00 minus 4.25.",
+    "type": "multiple_choice",
+    "options": [
+      "6.75",
+      "5.75",
+      "5.25",
+      "6.25"
+    ],
+    "correct_answer": "5.75",
+    "marks": 1,
+    "topic": "Decimals",
+    "cognitive_level": "Application",
+    "difficulty_score": 4,
+    "explanation": "Align the decimal points and subtract: 10.00 - 4.25 = 5.75.",
+    "question_number": 10
+  },
+  {
+    "question_text": "Find the Least Common Multiple (LCM) of 12 and 15.",
+    "type": "multiple_choice",
+    "options": [
+      "3",
+      "30",
+      "60",
+      "180"
+    ],
+    "correct_answer": "60",
+    "marks": 2,
+    "topic": "Whole Numbers",
+    "cognitive_level": "Knowledge",
+    "difficulty_score": 4,
+    "explanation": "To find the LCM, list the multiples of 12 (12, 24, 36, 48, 60...) and 15 (15, 30, 45, 60...). The smallest number common to both lists is 60.",
+    "question_number": 11
+  },
+  {
+    "question_text": "Which of the following lists the fractions in order from smallest to largest: 1/4, 1/2, 2/3?",
+    "type": "multiple_choice",
+    "options": [
+      "2/3, 1/2, 1/4",
+      "1/4, 1/2, 2/3",
+      "1/2, 1/4, 2/3",
+      "1/4, 2/3, 1/2"
+    ],
+    "correct_answer": "1/4, 1/2, 2/3",
+    "marks": 2,
+    "topic": "Fractions",
+    "cognitive_level": "Analysis",
+    "difficulty_score": 5,
+    "explanation": "Converting to decimals: 1/4 is 0.25, 1/2 is 0.5, and 2/3 is approximately 0.67. Therefore, 0.25 < 0.5 < 0.67.",
+    "question_number": 12
+  },
+  {
+    "question_text": "Round the decimal number 4.567 to two decimal places.",
+    "type": "multiple_choice",
+    "options": [
+      "4.56",
+      "4.57",
+      "4.60",
+      "4.568"
+    ],
+    "correct_answer": "4.57",
+    "marks": 1,
+    "topic": "Decimals",
+    "cognitive_level": "Knowledge",
+    "difficulty_score": 3,
+    "explanation": "When rounding to two decimal places, look at the third decimal digit (7). Since 7 is 5 or greater, round the second decimal digit (6) up to 7.",
+    "question_number": 13
+  },
+  {
+    "question_text": "In a triangle, two of the angles measure 45° and 75°. What is the size of the third angle?",
+    "type": "multiple_choice",
+    "options": [
+      "50°",
+      "60°",
+      "70°",
+      "80°"
+    ],
+    "correct_answer": "60°",
+    "marks": 2,
+    "topic": "Geometry",
+    "cognitive_level": "Application",
+    "difficulty_score": 5,
+    "explanation": "The sum of angles in a triangle is 180°. Subtract the known angles from 180: 180 - (45 + 75) = 180 - 120 = 60°.",
+    "question_number": 14
+  },
+  {
+    "question_text": "Identify the correct algebraic equation for the following statement: 'A number y decreased by 7 is equal to 10'.",
+    "type": "multiple_choice",
+    "options": [
+      "y + 7 = 10",
+      "7 - y = 10",
+      "y - 7 = 10",
+      "7y = 10"
+    ],
+    "correct_answer": "y - 7 = 10",
+    "marks": 2,
+    "topic": "Algebra",
+    "cognitive_level": "Knowledge",
+    "difficulty_score": 4,
+    "explanation": "'Decreased by' indicates subtraction, where the number being subtracted follows the original variable.",
+    "question_number": 15
+  },
+  {
+    "question_text": "Work out the value of √ (36 + 64).",
+    "type": "multiple_choice",
+    "options": [
+      "10",
+      "14",
+      "100",
+      "1000"
+    ],
+    "correct_answer": "10",
+    "marks": 2,
+    "topic": "Whole Numbers",
+    "cognitive_level": "Application",
+    "difficulty_score": 5,
+    "explanation": "First, find the sum inside the square root: 36 + 64 = 100. Then find the square root of 100, which is 10.",
+    "question_number": 16
+  },
+  {
+    "question_text": "Express 3/5 as a percentage.",
+    "type": "multiple_choice",
+    "options": [
+      "30%",
+      "35%",
+      "50%",
+      "60%"
+    ],
+    "correct_answer": "60%",
+    "marks": 2,
+    "topic": "Fractions",
+    "cognitive_level": "Application",
+    "difficulty_score": 4,
+    "explanation": "To convert a fraction to a percentage, multiply by 100: (3/5) * 100 = 300 / 5 = 60%.",
+    "question_number": 17
+  },
+  {
+    "question_text": "A student buys 3 pens at K2.50 each. How much change will they receive from a K10 note?",
+    "type": "multiple_choice",
+    "options": [
+      "K2.50",
+      "K6.50",
+      "K7.50",
+      "K3.50"
+    ],
+    "correct_answer": "K2.50",
+    "marks": 3,
+    "topic": "Decimals",
+    "cognitive_level": "Application",
+    "difficulty_score": 6,
+    "explanation": "Total cost = 3 * K2.50 = K7.50. Change = K10.00 - K7.50 = K2.50.",
+    "question_number": 18
+  },
+  {
+    "question_text": "Calculate the area of a triangle with a base of 10cm and a height of 6cm.",
+    "type": "multiple_choice",
+    "options": [
+      "60cm²",
+      "30cm²",
+      "16cm²",
+      "15cm²"
+    ],
+    "correct_answer": "30cm²",
+    "marks": 2,
+    "topic": "Geometry",
+    "cognitive_level": "Application",
+    "difficulty_score": 5,
+    "explanation": "The area of a triangle is (1/2) * base * height. (1/2) * 10 * 6 = 5 * 6 = 30.",
+    "question_number": 19
+  },
+  {
+    "question_text": "Evaluate the expression 3a - b when a = 4 and b = 2.",
+    "type": "multiple_choice",
+    "options": [
+      "6",
+      "8",
+      "10",
+      "14"
+    ],
+    "correct_answer": "10",
+    "marks": 2,
+    "topic": "Algebra",
+    "cognitive_level": "Application",
+    "difficulty_score": 5,
+    "explanation": "Substitute the values into the expression: 3(4) - 2 = 12 - 2 = 10.",
+    "question_number": 20
+  },
+  {
+    "question_text": "Find the Highest Common Factor (HCF) of 24 and 36.",
+    "type": "multiple_choice",
+    "options": [
+      "6",
+      "12",
+      "18",
+      "72"
+    ],
+    "correct_answer": "12",
+    "marks": 2,
+    "topic": "Whole Numbers",
+    "cognitive_level": "Application",
+    "difficulty_score": 5,
+    "explanation": "To find the HCF, list factors of 24 (1, 2, 3, 4, 6, 8, 12, 24) and 36 (1, 2, 3, 4, 6, 9, 12, 18, 36). The largest number present in both lists is 12.",
+    "question_number": 21
+  },
+  {
+    "question_text": "A farmer has 150 cabbages. If he sells 3/5 of them, how many cabbages does he have remaining?",
+    "type": "multiple_choice",
+    "options": [
+      "30",
+      "60",
+      "90",
+      "120"
+    ],
+    "correct_answer": "60",
+    "marks": 2,
+    "topic": "Fractions",
+    "cognitive_level": "Analysis",
+    "difficulty_score": 6,
+    "explanation": "First, find the amount sold: (3/5) * 150 = 90. To find the remainder, subtract the sold amount from the total: 150 - 90 = 60.",
+    "question_number": 22
+  },
+  {
+    "question_text": "Convert the fraction 1/8 into a decimal number.",
+    "type": "multiple_choice",
+    "options": [
+      "0.125",
+      "0.8",
+      "0.25",
+      "0.18"
+    ],
+    "correct_answer": "0.125",
+    "marks": 2,
+    "topic": "Decimals",
+    "cognitive_level": "Knowledge",
+    "difficulty_score": 4,
+    "explanation": "Divide the numerator (1) by the denominator (8). 1 ÷ 8 = 0.125.",
+    "question_number": 23
+  },
+  {
+    "question_text": "How many vertices does a triangular prism have?",
+    "type": "multiple_choice",
+    "options": [
+      "3",
+      "5",
+      "6",
+      "9"
+    ],
+    "correct_answer": "6",
+    "marks": 1,
+    "topic": "Geometry",
+    "cognitive_level": "Knowledge",
+    "difficulty_score": 4,
+    "explanation": "A triangular prism has two triangular bases (3 vertices each) and three rectangular sides. Total vertices = 3 + 3 = 6.",
+    "question_number": 24
+  },
+  {
+    "question_text": "What is the value of 'p' in the inequality 3p < 12?",
+    "type": "multiple_choice",
+    "options": [
+      "p < 4",
+      "p > 4",
+      "p < 36",
+      "p = 4"
+    ],
+    "correct_answer": "p < 4",
+    "marks": 2,
+    "topic": "Algebra",
+    "cognitive_level": "Application",
+    "difficulty_score": 5,
+    "explanation": "Divide both sides of the inequality by 3. 3p/3 < 12/3 results in p < 4.",
+    "question_number": 25
+  },
+  {
+    "question_text": "Write the number 44 in Roman numerals.",
+    "type": "multiple_choice",
+    "options": [
+      "XXXXIIII",
+      "XLVI",
+      "XLIV",
+      "LXIV"
+    ],
+    "correct_answer": "XLIV",
+    "marks": 1,
+    "topic": "Whole Numbers",
+    "cognitive_level": "Knowledge",
+    "difficulty_score": 4,
+    "explanation": "40 is represented as XL (10 less than 50) and 4 is IV (1 less than 5). Therefore, 44 is XLIV.",
+    "question_number": 26
+  },
+  {
+    "question_text": "Calculate the volume of a cube with a side length of 4 cm.",
+    "type": "multiple_choice",
+    "options": [
+      "12 cm³",
+      "16 cm³",
+      "32 cm³",
+      "64 cm³"
+    ],
+    "correct_answer": "64 cm³",
+    "marks": 2,
+    "topic": "Geometry",
+    "cognitive_level": "Application",
+    "difficulty_score": 5,
+    "explanation": "Volume of a cube = side × side × side. 4 * 4 * 4 = 64 cm³.",
+    "question_number": 27
+  },
+  {
+    "question_text": "If a notebook costs K12.50, how much will 6 similar notebooks cost?",
+    "type": "multiple_choice",
+    "options": [
+      "K60.00",
+      "K72.00",
+      "K75.00",
+      "K80.50"
+    ],
+    "correct_answer": "K75.00",
+    "marks": 2,
+    "topic": "Decimals",
+    "cognitive_level": "Application",
+    "difficulty_score": 5,
+    "explanation": "Multiply the unit cost by the quantity: 12.50 * 6. 12 * 6 = 72 and 0.5 * 6 = 3. 72 + 3 = 75.",
+    "question_number": 28
+  },
+  {
+    "question_text": "Express the improper fraction 23/7 as a mixed number.",
+    "type": "multiple_choice",
+    "options": [
+      "2 3/7",
+      "3 2/7",
+      "3 1/7",
+      "3 7/2"
+    ],
+    "correct_answer": "3 2/7",
+    "marks": 2,
+    "topic": "Fractions",
+    "cognitive_level": "Application",
+    "difficulty_score": 4,
+    "explanation": "Divide 23 by 7. 7 goes into 23 three times (21) with a remainder of 2. This gives 3 2/7.",
+    "question_number": 29
+  },
+  {
+    "question_text": "Misozi is 'k' years old. Her mother is three times as old as Misozi. Write an expression for the sum of their ages.",
+    "type": "multiple_choice",
+    "options": [
+      "3k",
+      "k + 3",
+      "4k",
+      "k + 3k + 1"
+    ],
+    "correct_answer": "4k",
+    "marks": 2,
+    "topic": "Algebra",
+    "cognitive_level": "Analysis",
+    "difficulty_score": 7,
+    "explanation": "Misozi = k. Mother = 3k. Sum = k + 3k = 4k.",
+    "question_number": 30
+  }
+]

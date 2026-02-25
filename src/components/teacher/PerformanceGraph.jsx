@@ -37,25 +37,29 @@ export default function PerformanceGraph({ attempts }) {
     }
     const avgImprovement = deltaCount > 0 ? (totalDelta / deltaCount).toFixed(1) : 0;
 
-    // Practice frequency
+    // Practice frequency formally calculated as Attempts/Week
     const firstDate = attempts[0].date ? new Date(attempts[0].date) : null;
     const lastDate = attempts[attempts.length - 1].date ? new Date(attempts[attempts.length - 1].date) : null;
-    let frequencyText = `${attempts.length} attempt${attempts.length !== 1 ? 's' : ''}`;
+    let attemptsPerWeek = '0.0';
+
     if (firstDate && lastDate && attempts.length > 1) {
         const daysDiff = Math.max(1, Math.ceil((lastDate - firstDate) / (1000 * 60 * 60 * 24)));
-        if (daysDiff <= 7) {
-            frequencyText = `${attempts.length} attempts in ${daysDiff} day${daysDiff !== 1 ? 's' : ''}`;
-        } else {
-            const weeks = Math.ceil(daysDiff / 7);
-            const perWeek = (attempts.length / weeks).toFixed(1);
-            frequencyText = `~${perWeek} per week (over ${weeks} week${weeks !== 1 ? 's' : ''})`;
-        }
+        const weeks = Math.max(1, daysDiff / 7);
+        attemptsPerWeek = (attempts.length / weeks).toFixed(1);
+    } else if (attempts.length === 1) {
+        attemptsPerWeek = '1.0'; // Default for a single attempt
     }
 
     // Pattern-based commentary
     let commentary = '';
+    const speed = Number(attemptsPerWeek);
+
     if (attempts.length < 2) {
-        commentary = 'Just getting started — keep practicing!';
+        commentary = 'Just starting out. Consistency is key to improvement!';
+    } else if (speed >= 3 && Number(avgImprovement) > 0) {
+        commentary = '🔥 High intensity practice! The frequent attempts are clearly paying off.';
+    } else if (speed < 1 && Number(avgImprovement) < 0) {
+        commentary = '🧊 Practice has slowed down. Regular weekly practice helps maintain concepts.';
     } else if (Number(avgImprovement) > 5) {
         commentary = '🚀 Rapidly improving! Great momentum.';
     } else if (Number(avgImprovement) > 0) {
@@ -173,10 +177,10 @@ export default function PerformanceGraph({ attempts }) {
                             </span>
                             <span className="stat-box-label">Avg Change</span>
                         </div>
-                    </div>
-                    <div className="stat-row">
-                        <span className="stat-row-label">Practice</span>
-                        <span className="stat-row-value">{frequencyText}</span>
+                        <div className="stat-box">
+                            <span className="stat-box-value frequency">{attemptsPerWeek}</span>
+                            <span className="stat-box-label">Trials/wk</span>
+                        </div>
                     </div>
                     <div className="commentary-box">
                         {commentary}

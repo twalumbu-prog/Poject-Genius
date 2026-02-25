@@ -130,6 +130,52 @@ export default function MarkingSchemeReview() {
         }
     };
 
+    const handleFillAnswers = async () => {
+        if (questions.length === 0) return;
+
+        try {
+            setGenerating(true);
+            setError(null);
+
+            const { data, error: invokeError } = await supabase.functions.invoke('process-test-ai', {
+                body: {
+                    mode: 'solve_questions',
+                    testParams: {
+                        questions: questions.map(q => ({
+                            question_number: q.question_number,
+                            question_text: q.question_text,
+                            options: q.options
+                        }))
+                    }
+                }
+            });
+
+            if (invokeError) throw invokeError;
+            if (data.error) throw new Error(data.error);
+
+            if (data.questions) {
+                const updatedQuestions = questions.map(q => {
+                    const solved = data.questions.find(s => s.question_number === q.question_number);
+                    if (solved) {
+                        return {
+                            ...q,
+                            correct_answer: solved.correct_answer,
+                            explanation: solved.explanation || q.explanation
+                        };
+                    }
+                    return q;
+                });
+                setQuestions(updatedQuestions);
+                alert('Answers populated successfully by AI!');
+            }
+        } catch (err) {
+            console.error('Error filling answers:', err);
+            setError(`AI Solving failed: ${err.message}`);
+        } finally {
+            setGenerating(false);
+        }
+    };
+
     const triggerAIUpload = () => {
         const input = document.createElement('input');
         input.type = 'file';
@@ -217,6 +263,14 @@ export default function MarkingSchemeReview() {
                     >
                         {generating ? <Loader size={18} className="spinner" /> : <Sparkles size={18} />}
                         {generating ? 'Analyzing Image...' : 'Generate from Image'}
+                    </button>
+                    <button
+                        className="btn btn-secondary ai-btn"
+                        onClick={handleFillAnswers}
+                        disabled={generating || saving || questions.length === 0}
+                    >
+                        {generating ? <Loader size={18} className="spinner" /> : <Sparkles size={18} />}
+                        {generating ? 'Solving...' : 'Fill Answers with AI'}
                     </button>
                     <button
                         className="btn btn-secondary print-btn"

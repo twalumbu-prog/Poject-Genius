@@ -1,0 +1,39 @@
+{
+  "version": "5",
+  "redirects": {
+    "https://esm.sh/@google/genai": "https://esm.sh/@google/genai@1.42.0",
+    "https://esm.sh/p-retry@^4.6.2?target=denonext": "https://esm.sh/p-retry@4.6.2?target=denonext",
+    "https://esm.sh/retry@^0.13.1?target=denonext": "https://esm.sh/retry@0.13.1?target=denonext"
+  },
+  "remote": {
+    "https://esm.sh/@google/genai@1.42.0": "32620cc02668c3d6f5b881626b40eafe3836de841ca16878db55d98489d0ff95",
+    "https://esm.sh/@google/genai@1.42.0/denonext/genai.mjs": "ffd6a2c84c34be74288d206cd1a9d773e4992fd9b7e3c880280aa7bc41080990",
+    "https://esm.sh/p-retry@4.6.2/denonext/p-retry.mjs": "201a432807b70b43475e6d40db8d51ecee8307925878b365a748587bccccd929",
+    "https://esm.sh/p-retry@4.6.2?target=denonext": "ccfadc4b5fb4a29393fa61e869c925e99b1304e605ccb8d7930ffec0260e0576",
+    "https://esm.sh/retry@0.13.1/denonext/retry.mjs": "5c13e3bef93acedbd39ce3721c8721730dcfc03f241849463a81f00ad5e67819",
+    "https://esm.sh/retry@0.13.1?target=denonext": "dacad23319e574ff0f3f99524f394c14a71edebcee0b47a8a1f6213238e76fde"
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:@eslint/js@^9.39.1",
+        "npm:@google/genai@^1.42.0",
+        "npm:@supabase/supabase-js@^2.93.2",
+        "npm:@types/react-dom@^19.2.3",
+        "npm:@types/react@^19.2.5",
+        "npm:@vitejs/plugin-react@^5.1.1",
+        "npm:eslint-plugin-react-hooks@^7.0.1",
+        "npm:eslint-plugin-react-refresh@~0.4.24",
+        "npm:eslint@^9.39.1",
+        "npm:globals@^16.5.0",
+        "npm:lucide-react@0.563",
+        "npm:react-dom@^19.2.0",
+        "npm:react-router-dom@^7.13.0",
+        "npm:react@^19.2.0",
+        "npm:supabase@^2.76.7",
+        "npm:tesseract.js@7",
+        "npm:vite@^7.2.4"
+      ]
+    }
+  }
+}

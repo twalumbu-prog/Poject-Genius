@@ -19,6 +19,7 @@ import PupilAnalysis from './pages/teacher/PupilAnalysis';
 import AITestGenerator from './pages/teacher/AITestGenerator';
 import MarkingSchemeReview from './pages/teacher/MarkingSchemeReview';
 import StudentProfile from './pages/teacher/StudentProfile';
+import ReportCardView from './pages/teacher/ReportCardView';
 
 // Admin pages
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -136,6 +137,15 @@ function App() {
           element={
             <ProtectedRoute requiredRole="teacher">
               <StudentProfile />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/teacher/student/:pupilId/report"
+          element={
+            <ProtectedRoute requiredRole="teacher">
+              <ReportCardView />
             </ProtectedRoute>
           }
         />

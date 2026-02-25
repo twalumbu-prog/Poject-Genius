@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
-import { ArrowLeft, ChevronDown, ChevronRight, ChevronUp } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronRight, ChevronUp, FileText } from 'lucide-react';
 import PerformanceGraph from '../../components/teacher/PerformanceGraph';
+import ReportCardModal from '../../components/teacher/ReportCardModal';
 import './StudentProfile.css';
 
 const STATUS_CONFIG = {
@@ -30,6 +31,7 @@ export default function StudentProfile() {
     const [activeSubject, setActiveSubject] = useState(null);
     const [expandedTopic, setExpandedTopic] = useState(null);
     const [showMoreSubjects, setShowMoreSubjects] = useState(false);
+    const [showReportModal, setShowReportModal] = useState(false);
     const [loading, setLoading] = useState(true);
 
     const VISIBLE_TABS = 3;
@@ -146,6 +148,17 @@ export default function StudentProfile() {
         return avgB - avgA;
     });
 
+    const handleGenerateReport = (config) => {
+        setShowReportModal(false);
+        const params = new URLSearchParams();
+        params.set('mode', config.mode);
+        params.set('includeCharts', config.includeCharts);
+        if (config.streamId) params.set('streamId', config.streamId);
+        if (config.testIds.length > 0) params.set('testIds', config.testIds.join(','));
+
+        navigate(`/teacher/student/${pupilId}/report?${params.toString()}`);
+    };
+
     const visibleSubjects = subjects.slice(0, VISIBLE_TABS);
     const moreSubjects = subjects.slice(VISIBLE_TABS);
 
@@ -165,9 +178,18 @@ export default function StudentProfile() {
             </div>
 
             {/* Student Name */}
-            <div className="profile-identity">
-                <h1 className="profile-name">{pupil.name}</h1>
-                {pupil.grade && <p className="profile-grade">{pupil.grade}</p>}
+            <div className="profile-header-meta">
+                <div className="profile-identity">
+                    <h1 className="profile-name">{pupil.name}</h1>
+                    {pupil.grade && <p className="profile-grade">{pupil.grade}</p>}
+                </div>
+                <button
+                    className="btn-report"
+                    onClick={() => setShowReportModal(true)}
+                >
+                    <FileText size={18} />
+                    Create Report
+                </button>
             </div>
 
             {/* Subject Tabs */}
@@ -248,6 +270,14 @@ export default function StudentProfile() {
                     );
                 })}
             </div>
+
+            <ReportCardModal
+                isOpen={showReportModal}
+                onClose={() => setShowReportModal(false)}
+                pupilId={pupilId}
+                subjects={subjects}
+                onGenerate={handleGenerateReport}
+            />
         </div>
     );
 }

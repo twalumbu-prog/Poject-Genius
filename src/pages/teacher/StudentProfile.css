@@ -28,8 +28,45 @@
 }
 
 /* ========= IDENTITY ========= */
-.profile-identity {
+.profile-header-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: var(--spacing-xl);
+    flex-wrap: wrap;
+    gap: var(--spacing-md);
+}
+
+.profile-identity {
+    flex: 1;
+}
+
+.btn-report {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: 10px 20px;
+    background: white;
+    border: 2px solid var(--color-accent-primary);
+    color: var(--color-accent-primary);
+    border-radius: var(--radius-lg);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-bold);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    box-shadow: 0 4px 0 var(--color-accent-light);
+    transition: all var(--transition-fast);
+}
+
+.btn-report:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 5px 0 var(--color-accent-light);
+}
+
+.btn-report:active {
+    transform: translateY(3px);
+    box-shadow: 0 1px 0 var(--color-accent-light);
 }
 
 .profile-name {

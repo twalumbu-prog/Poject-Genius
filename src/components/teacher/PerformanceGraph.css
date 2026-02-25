@@ -233,9 +233,9 @@
 
 .stats-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: 1fr 1fr;
     gap: var(--spacing-sm);
-    margin-bottom: var(--spacing-md);
+    margin-bottom: var(--spacing-sm);
 }
 
 .stat-box {
@@ -266,32 +266,16 @@
     color: var(--color-error);
 }
 
+.stat-box-value.frequency {
+    color: var(--color-accent-primary);
+}
+
 .stat-box-label {
     font-size: var(--font-size-xs);
     font-weight: var(--font-weight-bold);
     color: var(--color-text-tertiary);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-}
-
-.stat-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--spacing-sm) 0;
-    border-top: 1px solid var(--color-border-light);
-}
-
-.stat-row-label {
-    font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-bold);
-    color: var(--color-text-secondary);
-}
-
-.stat-row-value {
-    font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-semibold);
-    color: var(--color-text-primary);
 }
 
 .commentary-box {
