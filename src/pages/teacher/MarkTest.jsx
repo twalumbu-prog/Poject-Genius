@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { ArrowLeft, Camera, Upload, Loader, CheckCircle, AlertCircle, Sparkles } from 'lucide-react';
 import { createWorker } from 'tesseract.js';
+import { applyDocScanFilter } from '../../utils/imageProcessing';
 import './Page.css';
 
 export default function MarkTest() {
@@ -17,6 +18,9 @@ export default function MarkTest() {
     const [pupils, setPupils] = useState([]);
     const [reviewData, setReviewData] = useState(null);
     const [scannedImage, setScannedImage] = useState(null);
+    const [isCameraOpen, setIsCameraOpen] = useState(false);
+    const [activeTab, setActiveTab] = useState('script'); // 'script' or 'answers' for mobile
+    const [videoRef, setVideoRef] = useState(null);
 
     useEffect(() => {
         fetchTestData();
@@ -77,7 +81,11 @@ export default function MarkTest() {
                 reader.onload = () => resolve(reader.result);
                 reader.readAsDataURL(file);
             });
-            const base64Image = await base64Promise;
+            const rawBase64 = await base64Promise;
+
+            setProcessingStatus('Enhancing image for better AI accuracy...');
+            const filteredBase64 = await applyDocScanFilter(rawBase64);
+            const base64Image = filteredBase64;
 
             // 1. Call AI Marking Edge Function
             const response = await fetch(
@@ -300,14 +308,123 @@ export default function MarkTest() {
                 </datalist>
             </div>
 
+            {isCameraOpen && (
+                <div className="camera-modal">
+                    <div className="camera-content">
+                        <div className="camera-header">
+                            <h3>Document Scanner</h3>
+                            <button className="btn-close" onClick={() => {
+                                if (videoRef && videoRef.srcObject) {
+                                    videoRef.srcObject.getTracks().forEach(track => track.stop());
+                                }
+                                setIsCameraOpen(false);
+                            }}>×</button>
+                        </div>
+                        <div className="video-wrapper">
+                            <video
+                                ref={el => {
+                                    setVideoRef(el);
+                                    if (el && !el.srcObject) {
+                                        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+                                            .then(stream => { el.srcObject = stream; el.play(); })
+                                            .catch(err => console.error("Camera error:", err));
+                                    }
+                                }}
+                                autoPlay
+                                playsInline
+                            />
+                            <div className="scanner-overlay">
+                                <div className="scanner-frame"></div>
+                            </div>
+                        </div>
+                        <div className="camera-footer">
+                            <button className="btn btn-primary btn-capture" onClick={async () => {
+                                const canvas = document.createElement('canvas');
+                                canvas.width = videoRef.videoWidth;
+                                canvas.height = videoRef.videoHeight;
+                                const ctx = canvas.getContext('2d');
+                                ctx.drawImage(videoRef, 0, 0);
+
+                                const rawBase64 = canvas.toDataURL('image/jpeg');
+
+                                // Stop camera
+                                videoRef.srcObject.getTracks().forEach(track => track.stop());
+                                setIsCameraOpen(false);
+
+                                // Process as if it was uploaded
+                                try {
+                                    setIsProcessing(true);
+                                    setProcessingStatus('Enhancing scanned script...');
+                                    const filteredBase64 = await applyDocScanFilter(rawBase64);
+
+                                    // Trigger AI marking directly
+                                    setProcessingStatus('Analyzing script with AI...');
+                                    const response = await fetch(
+                                        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-test-ai`,
+                                        {
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json',
+                                                'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+                                                'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+                                            },
+                                            body: JSON.stringify({
+                                                mode: 'mark_script',
+                                                image: filteredBase64,
+                                                markingScheme: markingScheme.questions,
+                                                geminiKey: import.meta.env.VITE_GEMINI_API_KEY
+                                            })
+                                        }
+                                    );
+
+                                    if (!response.ok) throw new Error("AI failed");
+                                    const data = await response.json();
+
+                                    setScannedImage(filteredBase64);
+                                    setReviewData({
+                                        studentName: data.studentName || '',
+                                        studentAnswers: markingScheme.questions.map(q => {
+                                            const aiAns = data.answers.find(a => a.question_number === q.question_number);
+                                            return {
+                                                question_number: q.question_number,
+                                                student_answer: aiAns?.student_answer || '',
+                                                is_correct: aiAns ? aiAns.is_correct : false,
+                                                feedback: aiAns?.feedback || (aiAns ? '' : 'Missing from extraction'),
+                                                confidence: aiAns?.confidence || 'Low',
+                                                topic: q.topic
+                                            };
+                                        })
+                                    });
+                                } catch (error) {
+                                    alert(`Scan failed: ${error.message}`);
+                                } finally {
+                                    setIsProcessing(false);
+                                    setProcessingStatus('');
+                                }
+                            }}>
+                                <Camera size={24} />
+                                Capture Script
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {!reviewData && !results && (
                 <div className="mark-options">
-                    <div className="mark-option-card" onClick={triggerFileUpload}>
+                    <div className="mark-option-card" onClick={() => setIsCameraOpen(true)}>
                         <div className="option-icon">
                             <Camera size={48} strokeWidth={1.5} />
                         </div>
-                        <h3>Scan or Upload Script</h3>
-                        <p>Take a photo or upload a scanned student answer sheet</p>
+                        <h3>Scan Script</h3>
+                        <p>Use your camera to scan student answer sheet</p>
+                    </div>
+                    <div className="mark-option-card" onClick={triggerFileUpload}>
+                        <div className="option-icon">
+                            <Upload size={48} strokeWidth={1.5} />
+                        </div>
+                        <h3>Upload Image</h3>
+                        <p>Upload a photo or PDF from your gallery</p>
                     </div>
                 </div>
             )}
@@ -316,13 +433,27 @@ export default function MarkTest() {
                 <div className="review-interface">
                     <div className="review-header">
                         <h2>Review Extraction</h2>
+                        <div className="review-tabs">
+                            <button
+                                className={`tab-btn ${activeTab === 'script' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('script')}
+                            >
+                                View Script
+                            </button>
+                            <button
+                                className={`tab-btn ${activeTab === 'answers' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('answers')}
+                            >
+                                Verify Answers
+                            </button>
+                        </div>
                         <div className="review-actions">
                             <button className="btn btn-secondary" onClick={() => setReviewData(null)}>Cancel</button>
-                            <button className="btn btn-primary" onClick={handleSaveResult}>Confirm & Save Result</button>
+                            <button className="btn btn-primary" onClick={handleSaveResult}>Confirm & Save</button>
                         </div>
                     </div>
 
-                    <div className="review-content">
+                    <div className={`review-content mobile-tab-${activeTab}`}>
                         <div className="review-image-pane">
                             <h3>Scanned Script</h3>
                             <div className="image-container">
@@ -338,12 +469,12 @@ export default function MarkTest() {
                                     list="pupil-list"
                                     value={reviewData.studentName}
                                     onChange={(e) => setReviewData({ ...reviewData, studentName: e.target.value })}
-                                    placeholder="Enter or select student name"
+                                    placeholder="Enter student name"
                                     className="student-name-input"
                                 />
                             </div>
 
-                            <h3>Answer Verification</h3>
+                            <h3>Verification</h3>
                             <div className="review-answers-list">
                                 {reviewData.studentAnswers.map((ans, idx) => (
                                     <div key={idx} className={`review-item ${ans.confidence === 'Low' || !ans.student_answer ? 'review-warning' : ''}`}>

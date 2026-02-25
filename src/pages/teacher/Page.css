@@ -677,12 +677,212 @@
     }
 }
 
-@media (max-width: 1024px) {
-    .review-content {
-        grid-template-columns: 1fr;
+/* Camera Modal & Scanner Styles */
+.camera-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #000;
+    z-index: var(--z-modal);
+    display: flex;
+    flex-direction: column;
+}
+
+.camera-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.camera-header {
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: var(--spacing-md) var(--spacing-lg);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.btn-close {
+    color: white;
+    font-size: 32px;
+    padding: 0 var(--spacing-sm);
+}
+
+.video-wrapper {
+    flex: 1;
+    position: relative;
+    background: #000;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.scanner-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.scanner-frame {
+    width: 80%;
+    height: 70%;
+    border: 2px solid rgba(255, 255, 255, 0.5);
+    border-radius: 12px;
+    box-shadow: 0 0 0 1000px rgba(0, 0, 0, 0.4);
+    position: relative;
+}
+
+.scanner-frame::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--color-accent-primary);
+    box-shadow: 0 0 15px var(--color-accent-primary);
+    animation: scan 3s ease-in-out infinite;
+}
+
+@keyframes scan {
+
+    0%,
+    100% {
+        top: 0;
     }
 
-    .review-image-pane {
-        position: static;
+    50% {
+        top: 100%;
+    }
+}
+
+.camera-footer {
+    padding: var(--spacing-xl);
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    justify-content: center;
+}
+
+.btn-capture {
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    background: white !important;
+    color: var(--color-accent-primary) !important;
+    border: 5px solid rgba(255, 255, 255, 0.3) !important;
+    display: flex;
+    flex-direction: column;
+    font-size: 10px;
+    text-transform: none;
+    padding: 0;
+    box-shadow: none !important;
+}
+
+.btn-capture:active {
+    transform: scale(0.9) !important;
+}
+
+/* Tabbed Review Styles */
+.review-tabs {
+    display: none;
+    /* Only show on mobile */
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+    width: 100%;
+}
+
+.tab-btn {
+    flex: 1;
+    padding: var(--spacing-sm);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-secondary);
+    color: var(--color-text-secondary);
+    font-weight: var(--font-weight-bold);
+    font-size: var(--font-size-sm);
+    border: 2px solid var(--color-border-light);
+}
+
+.tab-btn.active {
+    background: var(--color-accent-primary);
+    color: white;
+    border-color: var(--color-accent-shadow);
+}
+
+@media (max-width: 768px) {
+    .review-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--spacing-md);
+    }
+
+    .review-tabs {
+        display: flex;
+    }
+
+    .review-actions {
+        width: 100%;
+    }
+
+    .review-actions .btn {
+        flex: 1;
+    }
+
+    .review-content.mobile-tab-script .review-data-pane {
+        display: none;
+    }
+
+    .review-content.mobile-tab-answers .review-image-pane {
+        display: none;
+    }
+}
+
+/* iPhone X & Small Device Optimizations */
+@media (max-width: 380px) {
+    .page-with-container {
+        padding: var(--spacing-md);
+        border-radius: 0;
+        border: none;
+    }
+
+    .page-header h1 {
+        font-size: var(--font-size-xl);
+    }
+
+    .review-item {
+        padding: var(--spacing-sm);
+    }
+
+    .review-item-header {
+        margin-bottom: var(--spacing-sm);
+    }
+
+    .q-circle {
+        width: 28px;
+        height: 28px;
+        font-size: 11px;
+    }
+
+    .status-badge {
+        font-size: 11px;
+    }
+
+    .student-name-input {
+        font-size: var(--font-size-base);
     }
 }
