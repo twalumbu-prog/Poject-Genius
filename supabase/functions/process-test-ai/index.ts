@@ -33,7 +33,8 @@ function cleanRepairAndParseJson(text: string) {
 
 const MODEL_NAME = "gemini-3-flash-preview";
 
-async function callGemini(messages: any[]) {
+async function callGemini(messages: any[], apiKey?: string) {
+  const activeKey = apiKey || GEMINI_API_KEY;
   try {
     const systemMessage = messages.find((m: any) => m.role === "system")?.content || "";
     const userMessage = messages.find((m: any) => m.role === "user");
@@ -80,7 +81,7 @@ async function callGemini(messages: any[]) {
       },
     };
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`, {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${activeKey}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -114,7 +115,8 @@ async function callGemini(messages: any[]) {
 }
 
 // Helper function to call Anthropic Claude
-async function callClaude(messages: any[]) {
+async function callClaude(messages: any[], apiKey?: string) {
+  const activeKey = apiKey || ANTHROPIC_API_KEY;
   const userMessages = messages.filter(m => m.role === "user");
   const systemMessages = messages.filter(m => m.role === "system");
 
@@ -161,7 +163,7 @@ async function callClaude(messages: any[]) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
-      "x-api-key": ANTHROPIC_API_KEY!,
+      "x-api-key": activeKey!,
       "anthropic-version": "2023-06-01",
       "Content-Type": "application/json",
     },
@@ -184,14 +186,14 @@ async function callClaude(messages: any[]) {
 }
 
 // Main AI call with fallback logic
-async function callAI(messages: any[]) {
+async function callAI(messages: any[], keys: { gemini?: string, claude?: string } = {}) {
   const errors: string[] = [];
 
   // Try Gemini first
-  if (GEMINI_API_KEY) {
+  if (keys.gemini || GEMINI_API_KEY) {
     try {
       console.log("Trying Gemini...");
-      const result = await callGemini(messages);
+      const result = await callGemini(messages, keys.gemini);
       console.log("✅ Gemini succeeded");
       return { result, provider: "gemini" };
     } catch (error: any) {
@@ -205,10 +207,10 @@ async function callAI(messages: any[]) {
   }
 
   // Fallback to Claude
-  if (ANTHROPIC_API_KEY) {
+  if (keys.claude || ANTHROPIC_API_KEY) {
     try {
       console.log("Trying Claude...");
-      const result = await callClaude(messages);
+      const result = await callClaude(messages, keys.claude);
       console.log("✅ Claude succeeded");
       return { result, provider: "claude" };
     } catch (error: any) {
@@ -233,9 +235,11 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json();
-    const { mode, image, markingScheme, testParams } = body;
+    const { mode, image, markingScheme, testParams, geminiKey } = body;
 
-    if (!GEMINI_API_KEY && !ANTHROPIC_API_KEY) {
+    const activeGeminiKey = geminiKey || GEMINI_API_KEY;
+
+    if (!activeGeminiKey && !ANTHROPIC_API_KEY) {
       return new Response(
         JSON.stringify({ error: "No AI provider API keys configured. Please add GEMINI_API_KEY or ANTHROPIC_API_KEY." }),
         {
@@ -428,7 +432,7 @@ ${JSON.stringify(testParams.questions, null, 2)}`,
     }
 
     console.log("Calling AI provider...");
-    const { result, provider } = await callAI(messages);
+    const { result, provider } = await callAI(messages, { gemini: geminiKey });
     console.log(`AI succeeded with ${provider}`);
 
     return new Response(JSON.stringify({ ...result, _provider: provider }), {

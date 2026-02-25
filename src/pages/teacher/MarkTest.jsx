@@ -84,7 +84,8 @@ export default function MarkTest() {
                 body: {
                     mode: 'mark_script',
                     image: base64Image,
-                    markingScheme: markingScheme.questions
+                    markingScheme: markingScheme.questions,
+                    geminiKey: import.meta.env.VITE_GEMINI_API_KEY
                 }
             });
 
