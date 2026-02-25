@@ -21,6 +21,7 @@ export default function MarkTest() {
     const [isCameraOpen, setIsCameraOpen] = useState(false);
     const [activeTab, setActiveTab] = useState('script'); // 'script' or 'answers' for mobile
     const [videoRef, setVideoRef] = useState(null);
+    const [showLightbox, setShowLightbox] = useState(false);
 
     useEffect(() => {
         fetchTestData();
@@ -339,22 +340,37 @@ export default function MarkTest() {
                         </div>
                         <div className="camera-footer">
                             <button className="btn btn-primary btn-capture" onClick={async () => {
-                                const canvas = document.createElement('canvas');
-                                canvas.width = videoRef.videoWidth;
-                                canvas.height = videoRef.videoHeight;
-                                const ctx = canvas.getContext('2d');
-                                ctx.drawImage(videoRef, 0, 0);
+                                if (!videoRef) return;
 
-                                const rawBase64 = canvas.toDataURL('image/jpeg');
+                                const canvas = document.createElement('canvas');
+                                const videoWidth = videoRef.videoWidth;
+                                const videoHeight = videoRef.videoHeight;
+
+                                // Calculate the A4 Crop Box (Matching .scanner-frame CSS: 80% width, 70% height)
+                                const cropWidth = videoWidth * 0.8;
+                                const cropHeight = videoHeight * 0.7;
+                                const cropX = (videoWidth - cropWidth) / 2;
+                                const cropY = (videoHeight - cropHeight) / 2;
+
+                                canvas.width = cropWidth;
+                                canvas.height = cropHeight;
+
+                                const ctx = canvas.getContext('2d');
+                                // Draw only the cropped portion
+                                ctx.drawImage(videoRef, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+
+                                const rawBase64 = canvas.toDataURL('image/jpeg', 0.9);
 
                                 // Stop camera
-                                videoRef.srcObject.getTracks().forEach(track => track.stop());
+                                if (videoRef.srcObject) {
+                                    videoRef.srcObject.getTracks().forEach(track => track.stop());
+                                }
                                 setIsCameraOpen(false);
 
                                 // Process as if it was uploaded
                                 try {
                                     setIsProcessing(true);
-                                    setProcessingStatus('Enhancing scanned script...');
+                                    setProcessingStatus('Crunching handwriting...');
                                     const filteredBase64 = await applyDocScanFilter(rawBase64);
 
                                     // Trigger AI marking directly
@@ -456,7 +472,8 @@ export default function MarkTest() {
                     <div className={`review-content mobile-tab-${activeTab}`}>
                         <div className="review-image-pane">
                             <h3>Scanned Script</h3>
-                            <div className="image-container">
+                            <p className="hint-text">Click image to enlarge</p>
+                            <div className="image-container" onClick={() => setShowLightbox(true)}>
                                 <img src={scannedImage} alt="Scanned Script" />
                             </div>
                         </div>
@@ -567,11 +584,23 @@ export default function MarkTest() {
             {isProcessing && (
                 <div className="processing-overlay">
                     <div className="processing-content">
-                        <div className="ai-icon-pulse">
-                            <Sparkles size={48} />
+                        <div className="ai-loader-container">
+                            <div className="ai-ring"></div>
+                            <div className="ai-ring"></div>
+                            <div className="ai-ring"></div>
+                            <Sparkles size={32} className="ai-loader-icon" />
                         </div>
                         <h3>{processingStatus}</h3>
-                        <p>Using OpenAI Vision for high-accuracy handwriting analysis...</p>
+                        <p>High-accuracy AI vision analysis in progress...</p>
+                    </div>
+                </div>
+            )}
+
+            {showLightbox && (
+                <div className="lightbox-overlay" onClick={() => setShowLightbox(false)}>
+                    <div className="lightbox-content" onClick={e => e.stopPropagation()}>
+                        <button className="lightbox-close" onClick={() => setShowLightbox(false)}>×</button>
+                        <img src={scannedImage} alt="Full Screen Scan" />
                     </div>
                 </div>
             )}
