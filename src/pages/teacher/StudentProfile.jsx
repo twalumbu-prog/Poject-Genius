@@ -257,8 +257,17 @@ export default function StudentProfile() {
             {/* Topic Cards */}
             {subjects.length === 0 && (
                 <div className="profile-empty">
-                    <p>No topic-level analysis available yet.</p>
-                    <p className="profile-empty-sub">Analyze a test with topics to see performance data here.</p>
+                    {pupil.grade ? (
+                        <>
+                            <p>No topic-level analysis available yet.</p>
+                            <p className="profile-empty-sub">Analyze a test with topics to see performance data here.</p>
+                        </>
+                    ) : (
+                        <>
+                            <p>Student grade is not set.</p>
+                            <p className="profile-empty-sub">Edit the student's profile or mark a test for them to assign a grade and view their full curriculum tracker.</p>
+                        </>
+                    )}
                 </div>
             )}
 
