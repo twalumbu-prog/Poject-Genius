@@ -107,16 +107,29 @@ export default function MarkingSchemeReview() {
             });
             const base64Image = await base64Promise;
 
-            const { data, error: invokeError } = await supabase.functions.invoke('process-test-ai', {
-                body: {
-                    mode: 'generate_key',
-                    image: base64Image,
-                    geminiKey: import.meta.env.VITE_GEMINI_API_KEY
+            const response = await fetch(
+                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-test-ai`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+                        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+                    },
+                    body: JSON.stringify({
+                        mode: 'generate_key',
+                        image: base64Image,
+                        geminiKey: import.meta.env.VITE_GEMINI_API_KEY
+                    })
                 }
-            });
+            );
 
-            if (invokeError) throw invokeError;
-            if (data.error) throw new Error(data.error);
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || errorData.error || `Error ${response.status}`);
+            }
+
+            const data = await response.json();
 
             if (data.questions) {
                 setQuestions(data.questions);
@@ -138,22 +151,35 @@ export default function MarkingSchemeReview() {
             setGenerating(true);
             setError(null);
 
-            const { data, error: invokeError } = await supabase.functions.invoke('process-test-ai', {
-                body: {
-                    mode: 'solve_questions',
-                    testParams: {
-                        questions: questions.map(q => ({
-                            question_number: q.question_number,
-                            question_text: q.question_text,
-                            options: q.options
-                        })),
+            const response = await fetch(
+                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-test-ai`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+                        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
                     },
-                    geminiKey: import.meta.env.VITE_GEMINI_API_KEY
+                    body: JSON.stringify({
+                        mode: 'solve_questions',
+                        testParams: {
+                            questions: questions.map(q => ({
+                                question_number: q.question_number,
+                                question_text: q.question_text,
+                                options: q.options
+                            })),
+                        },
+                        geminiKey: import.meta.env.VITE_GEMINI_API_KEY
+                    })
                 }
-            });
+            );
 
-            if (invokeError) throw invokeError;
-            if (data.error) throw new Error(data.error);
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || errorData.error || `Error ${response.status}`);
+            }
+
+            const data = await response.json();
 
             if (data.questions) {
                 const updatedQuestions = questions.map(q => {

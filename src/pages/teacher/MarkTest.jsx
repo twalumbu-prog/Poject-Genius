@@ -80,17 +80,30 @@ export default function MarkTest() {
             const base64Image = await base64Promise;
 
             // 1. Call AI Marking Edge Function
-            const { data, error: invokeError } = await supabase.functions.invoke('process-test-ai', {
-                body: {
-                    mode: 'mark_script',
-                    image: base64Image,
-                    markingScheme: markingScheme.questions,
-                    geminiKey: import.meta.env.VITE_GEMINI_API_KEY
+            const response = await fetch(
+                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-test-ai`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+                        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+                    },
+                    body: JSON.stringify({
+                        mode: 'mark_script',
+                        image: base64Image,
+                        markingScheme: markingScheme.questions,
+                        geminiKey: import.meta.env.VITE_GEMINI_API_KEY
+                    })
                 }
-            });
+            );
 
-            if (invokeError) throw invokeError;
-            if (data.error) throw new Error(data.error);
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || errorData.error || `Error ${response.status}`);
+            }
+
+            const data = await response.json();
 
             const { studentName, answers: studentAnswers } = data;
 
@@ -166,6 +179,7 @@ export default function MarkTest() {
                 .single();
 
             if (resError) throw resError;
+
 
             // 4. Generate Topic Analysis
             const topicPerformance = {};
