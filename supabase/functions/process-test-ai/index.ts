@@ -1,4 +1,4 @@
-const GEMINI_API_KEY = "AIzaSyCgX-r4ssCAJMvkx9YcWGleQFgrdCjI6YA"; // Hardcoded for immediate deployment, replace with secret later
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 
 // Helper to clean and repair JSON string
