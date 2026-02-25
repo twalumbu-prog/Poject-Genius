@@ -183,7 +183,8 @@ export default function AITestGenerator() {
                         subject: formData.subject,
                         grade: formData.grade,
                         difficulty: formData.difficulty,
-                        existingQuestions: existingQuestionTitles // Pass current context
+                        existingQuestions: existingQuestionTitles, // Pass current context
+                        geminiKey: import.meta.env.VITE_GEMINI_API_KEY
                     }
                 };
 

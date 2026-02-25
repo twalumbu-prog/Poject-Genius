@@ -110,7 +110,8 @@ export default function MarkingSchemeReview() {
             const { data, error: invokeError } = await supabase.functions.invoke('process-test-ai', {
                 body: {
                     mode: 'generate_key',
-                    image: base64Image
+                    image: base64Image,
+                    geminiKey: import.meta.env.VITE_GEMINI_API_KEY
                 }
             });
 
@@ -145,7 +146,8 @@ export default function MarkingSchemeReview() {
                             question_number: q.question_number,
                             question_text: q.question_text,
                             options: q.options
-                        }))
+                        })),
+                        geminiKey: import.meta.env.VITE_GEMINI_API_KEY
                     }
                 }
             });
