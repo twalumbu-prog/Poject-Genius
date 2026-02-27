@@ -9,6 +9,11 @@
  * @returns {Promise<string>} - The processed image in base64 format.
  */
 export async function applyDocScanFilter(base64Image) {
+    // Skip image filter for PDFs or any non-image data
+    if (!base64Image.startsWith('data:image/')) {
+        return base64Image;
+    }
+
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => {

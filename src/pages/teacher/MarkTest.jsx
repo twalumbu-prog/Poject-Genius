@@ -16,12 +16,17 @@ export default function MarkTest() {
     const [results, setResults] = useState(null);
     const [loading, setLoading] = useState(true);
     const [pupils, setPupils] = useState([]);
-    const [reviewData, setReviewData] = useState(null);
+    const [reviewBatch, setReviewBatch] = useState(null);
+    const [currentReviewIndex, setCurrentReviewIndex] = useState(0);
+    const [batchResults, setBatchResults] = useState([]);
+
     const [scannedImage, setScannedImage] = useState(null);
     const [isCameraOpen, setIsCameraOpen] = useState(false);
     const [activeTab, setActiveTab] = useState('script'); // 'script' or 'answers' for mobile
     const [videoRef, setVideoRef] = useState(null);
     const [showLightbox, setShowLightbox] = useState(false);
+
+    const reviewData = reviewBatch ? reviewBatch[currentReviewIndex] : null;
 
     useEffect(() => {
         fetchTestData();
@@ -114,13 +119,13 @@ export default function MarkTest() {
 
             const data = await response.json();
 
-            const { studentName, answers: studentAnswers } = data;
-
-            setScannedImage(base64Image);
-            setReviewData({
-                studentName: studentName || '',
+            const resultsArray = data.results || [data];
+            const parsedBatch = resultsArray.map(studentData => ({
+                studentName: studentData.studentName || '',
+                studentId: studentData.student_id || '',
+                grade: studentData.grade || '',
                 studentAnswers: markingScheme.questions.map(q => {
-                    const aiAns = studentAnswers.find(a => a.question_number === q.question_number);
+                    const aiAns = studentData.answers?.find(a => a.question_number === q.question_number);
                     return {
                         question_number: q.question_number,
                         student_answer: aiAns?.student_answer || '',
@@ -130,10 +135,17 @@ export default function MarkTest() {
                         topic: q.topic
                     };
                 })
-            });
+            }));
+
+            setScannedImage(base64Image);
+            setReviewBatch(parsedBatch);
+            setCurrentReviewIndex(0);
+            setBatchResults([]);
+            setResults(null);
         } catch (error) {
             console.error('AI Processing Error:', error);
-            alert(`AI Marking failed: ${error.message}`);
+            const errorMessage = error?.message || (typeof error === 'string' ? error : "Unknown error occurred.");
+            alert(`AI Marking failed: ${errorMessage}`);
         } finally {
             setIsProcessing(false);
             setProcessingStatus('');
@@ -241,8 +253,16 @@ export default function MarkTest() {
 
             if (analysisError) throw analysisError;
 
-            setResults({ studentName, score, percentage, correctCount, studentAnswers });
-            setReviewData(null);
+            const newBatchResults = [...batchResults, { studentName, score, percentage, correctCount, studentAnswers }];
+            setBatchResults(newBatchResults);
+
+            if (currentReviewIndex < reviewBatch.length - 1) {
+                setCurrentReviewIndex(currentReviewIndex + 1);
+            } else {
+                setResults(newBatchResults);
+                setReviewBatch(null);
+                setCurrentReviewIndex(0);
+            }
         } catch (error) {
             console.error('Error saving result:', error);
             alert(`Error saving: ${error.message}`);
@@ -252,8 +272,15 @@ export default function MarkTest() {
         }
     };
 
+    const updateReviewField = (field, value) => {
+        const newBatch = [...reviewBatch];
+        newBatch[currentReviewIndex] = { ...newBatch[currentReviewIndex], [field]: value };
+        setReviewBatch(newBatch);
+    };
+
     const updateReviewAnswer = (index, field, value) => {
-        const newAnswers = [...reviewData.studentAnswers];
+        const newBatch = [...reviewBatch];
+        const newAnswers = [...newBatch[currentReviewIndex].studentAnswers];
         const updatedAns = { ...newAnswers[index], [field]: value };
 
         // Re-evaluate correctness if student_answer changed
@@ -266,7 +293,8 @@ export default function MarkTest() {
         }
 
         newAnswers[index] = updatedAns;
-        setReviewData({ ...reviewData, studentAnswers: newAnswers });
+        newBatch[currentReviewIndex] = { ...newBatch[currentReviewIndex], studentAnswers: newAnswers };
+        setReviewBatch(newBatch);
     };
 
     const triggerFileUpload = () => {
@@ -400,13 +428,13 @@ export default function MarkTest() {
                                     if (!response.ok) throw new Error("AI failed");
                                     const data = await response.json();
 
-                                    setScannedImage(filteredBase64);
-                                    setReviewData({
-                                        studentName: data.studentName || '',
-                                        studentId: data.student_id || '',
-                                        grade: data.grade || '',
+                                    const resultsArray = data.results || [data];
+                                    const parsedBatch = resultsArray.map(studentData => ({
+                                        studentName: studentData.studentName || '',
+                                        studentId: studentData.student_id || '',
+                                        grade: studentData.grade || '',
                                         studentAnswers: markingScheme.questions.map(q => {
-                                            const aiAns = data.answers.find(a => a.question_number === q.question_number);
+                                            const aiAns = studentData.answers?.find(a => a.question_number === q.question_number);
                                             return {
                                                 question_number: q.question_number,
                                                 student_answer: aiAns?.student_answer || '',
@@ -416,9 +444,16 @@ export default function MarkTest() {
                                                 topic: q.topic
                                             };
                                         })
-                                    });
+                                    }));
+                                    setScannedImage(filteredBase64);
+                                    setReviewBatch(parsedBatch);
+                                    setCurrentReviewIndex(0);
+                                    setBatchResults([]);
+                                    setResults(null);
                                 } catch (error) {
-                                    alert(`Scan failed: ${error.message}`);
+                                    console.error('Scan Error:', error);
+                                    const errorMessage = error?.message || (typeof error === 'string' ? error : "Unknown error occurred.");
+                                    alert(`Scan failed: ${errorMessage}`);
                                 } finally {
                                     setIsProcessing(false);
                                     setProcessingStatus('');
@@ -454,7 +489,7 @@ export default function MarkTest() {
             {reviewData && !results && (
                 <div className="review-interface">
                     <div className="review-header">
-                        <h2>Review Extraction</h2>
+                        <h2>Review Extraction ({currentReviewIndex + 1} of {reviewBatch.length})</h2>
                         <div className="review-tabs">
                             <button
                                 className={`tab-btn ${activeTab === 'script' ? 'active' : ''}`}
@@ -470,8 +505,10 @@ export default function MarkTest() {
                             </button>
                         </div>
                         <div className="review-actions">
-                            <button className="btn btn-secondary" onClick={() => setReviewData(null)}>Cancel</button>
-                            <button className="btn btn-primary" onClick={handleSaveResult}>Confirm & Save</button>
+                            <button className="btn btn-secondary" onClick={() => { setReviewBatch(null); setBatchResults([]); }}>Cancel</button>
+                            <button className="btn btn-primary" onClick={handleSaveResult}>
+                                {currentReviewIndex < reviewBatch.length - 1 ? 'Save & Next' : 'Confirm & Save All'}
+                            </button>
                         </div>
                     </div>
 
@@ -492,7 +529,7 @@ export default function MarkTest() {
                                         type="text"
                                         list="pupil-list"
                                         value={reviewData.studentName}
-                                        onChange={(e) => setReviewData({ ...reviewData, studentName: e.target.value })}
+                                        onChange={(e) => updateReviewField('studentName', e.target.value)}
                                         placeholder="Enter student name"
                                         className="student-name-input"
                                     />
@@ -503,7 +540,7 @@ export default function MarkTest() {
                                         <input
                                             type="text"
                                             value={reviewData.studentId}
-                                            onChange={(e) => setReviewData({ ...reviewData, studentId: e.target.value })}
+                                            onChange={(e) => updateReviewField('studentId', e.target.value)}
                                             placeholder="Extracted ID"
                                         />
                                     </div>
@@ -512,7 +549,7 @@ export default function MarkTest() {
                                         <input
                                             type="text"
                                             value={reviewData.grade}
-                                            onChange={(e) => setReviewData({ ...reviewData, grade: e.target.value })}
+                                            onChange={(e) => updateReviewField('grade', e.target.value)}
                                             placeholder="Extracted Grade"
                                         />
                                     </div>
@@ -556,51 +593,43 @@ export default function MarkTest() {
                 <div className="success-banner-large" style={{ textAlign: "left", alignItems: "flex-start" }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
                         <CheckCircle size={48} className="icon-success" />
-                        <h2 style={{ margin: 0 }}>Marking Complete!</h2>
+                        <h2 style={{ margin: 0 }}>Batch Marking Complete!</h2>
                     </div>
 
-                    <div className="result-summary-box" style={{ width: '100%', marginBottom: '24px' }}>
-                        <p><strong>Student:</strong> {results.studentName}</p>
-                        <p><strong>Total Score:</strong> {results.score} / {markingScheme.questions.length}</p>
-                        <p><strong>Percentage:</strong> {results.percentage.toFixed(1)}%</p>
-                    </div>
+                    <p style={{ marginBottom: '16px' }}>Successfully processed {results.length} script(s).</p>
 
-                    <h3 style={{ marginBottom: '16px' }}>Detailed Breakdown</h3>
-                    <div className="answers-breakdown" style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '400px', overflowY: 'auto', paddingRight: '8px' }}>
-                        {results.studentAnswers && results.studentAnswers.map((ans, idx) => (
-                            <div key={idx} style={{
-                                padding: '12px',
-                                border: `1px solid ${ans.is_correct ? '#10b981' : '#ef4444'}`,
-                                borderRadius: '8px',
-                                backgroundColor: ans.is_correct ? '#ecfdf5' : '#fef2f2'
-                            }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                                    <strong>Q{ans.question_number}</strong>
-                                    <span style={{
-                                        padding: '2px 8px',
-                                        borderRadius: '12px',
-                                        fontSize: '0.8rem',
-                                        backgroundColor: ans.confidence === 'Low' ? '#fef08a' : (ans.confidence === 'Medium' ? '#bfdbfe' : '#bbf7d0'),
-                                        color: '#374151'
-                                    }}>
-                                        {ans.confidence} Confidence
-                                    </span>
-                                </div>
-                                <div style={{ marginBottom: '4px' }}>
-                                    Student Answer: <strong style={{ color: ans.is_correct ? '#059669' : '#dc2626' }}>{ans.student_answer || 'None'}</strong>
-                                </div>
-                                {!ans.is_correct && ans.feedback && (
-                                    <div style={{ fontSize: '0.9rem', color: '#4b5563', marginTop: '8px', padding: '8px', backgroundColor: 'rgba(255,255,255,0.6)', borderRadius: '4px' }}>
-                                        <strong>AI Note:</strong> {ans.feedback}
+                    <div className="answers-breakdown" style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '500px', overflowY: 'auto', paddingRight: '8px' }}>
+                        {results.map((res, rIdx) => (
+                            <div key={rIdx} className="result-summary-box" style={{ width: '100%' }}>
+                                <h3 style={{ margin: '0 0 12px 0' }}>{res.studentName}</h3>
+                                <p><strong>Score:</strong> {res.score} / {markingScheme.questions.length}</p>
+                                <p><strong>Percentage:</strong> {res.percentage.toFixed(1)}%</p>
+                                <details style={{ marginTop: '8px' }}>
+                                    <summary style={{ cursor: 'pointer', fontWeight: 'bold' }}>View Details</summary>
+                                    <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        {res.studentAnswers && res.studentAnswers.map((ans, idx) => (
+                                            <div key={idx} style={{
+                                                padding: '8px',
+                                                border: `1px solid ${ans.is_correct ? '#10b981' : '#ef4444'}`,
+                                                borderRadius: '6px',
+                                                backgroundColor: ans.is_correct ? '#ecfdf5' : '#fef2f2',
+                                                fontSize: '0.9rem'
+                                            }}>
+                                                <strong>Q{ans.question_number}:</strong> {ans.student_answer || 'None'}
+                                                <span style={{ color: ans.is_correct ? '#059669' : '#dc2626', marginLeft: '8px' }}>
+                                                    ({ans.is_correct ? 'Correct' : 'Incorrect'})
+                                                </span>
+                                            </div>
+                                        ))}
                                     </div>
-                                )}
+                                </details>
                             </div>
                         ))}
                     </div>
 
                     <div className="banner-actions" style={{ marginTop: '24px', width: '100%', display: 'flex', gap: '12px' }}>
-                        <button className="btn btn-primary" onClick={() => setResults(null)}>
-                            Mark Another Script
+                        <button className="btn btn-primary" onClick={() => { setResults(null); setBatchResults([]); }}>
+                            Mark More Scripts
                         </button>
                         <button className="btn btn-secondary" onClick={() => navigate(`/teacher/test/${testId}`)}>
                             View All Results

@@ -362,28 +362,33 @@ Response Schema:
       messages = [
         {
           role: "system",
-          content: `You are an expert examiner grading a student's handwritten test script against a provided marking scheme.
+          content: `You are an expert examiner grading student handwritten test scripts against a provided marking scheme. The document might contain multiple different scripts from different students.
 Always respond with strictly valid JSON.
 
 CRITICAL INSTRUCTIONS:
-1. Extract the student's name from the top of the paper. If unreadable, return "Unknown".
-2. Compare the student's handwritten answer for each question against the correct answer in the marking scheme.
-3. If handwriting is crossed out, ignore the crossed-out part and evaluate the latest answer.
-4. If an answer is completely illegible, mark it incorrect, set confidence to "Low", and write "Illegible handwriting" in feedback.
-5. If the student left the question blank, mark it incorrect and write "Unanswered" in the student_answer field.
+1. Identify all distinct student scripts in the document.
+2. For each student script, extract the student's name from the top of the paper. If unreadable, return "Unknown".
+3. Evaluate the student's handwritten answer for each question against the correct answer in the marking scheme.
+4. If handwriting is crossed out, ignore the crossed-out part and evaluate the latest answer.
+5. If an answer is completely illegible, mark it incorrect, set confidence to "Low", and write "Illegible handwriting" in feedback.
+6. If the student left the question blank, mark it incorrect and write "Unanswered" in the student_answer field.
 
 Response Schema:
 {
-  "studentName": "string",
-  "student_id": "string (the student ID or index number handwritten on the sheet)",
-  "grade": "string (the grade level handwritten on the sheet, e.g. Grade 8)",
-  "answers": [
+  "results": [
     {
-      "question_number": number,
-      "student_answer": "string (what the student wrote, e.g. 'A', 'B', 'Blank', 'Illegible')",
-      "is_correct": boolean,
-      "feedback": "string (Explain why it is wrong, or note if illegible/blank. Leave empty if correct.)",
-      "confidence": "High|Medium|Low"
+      "studentName": "string",
+      "student_id": "string (the student ID or index number handwritten on the sheet)",
+      "grade": "string (the grade level handwritten on the sheet, e.g. Grade 8)",
+      "answers": [
+        {
+          "question_number": number,
+          "student_answer": "string (what the student wrote, e.g. 'A', 'B', 'Blank', 'Illegible')",
+          "is_correct": boolean,
+          "feedback": "string (Explain why it is wrong, or note if illegible/blank. Leave empty if correct.)",
+          "confidence": "High|Medium|Low"
+        }
+      ]
     }
   ]
 }`,
@@ -393,7 +398,7 @@ Response Schema:
           content: [
             {
               type: "text",
-              text: `Evaluate this student handwritten test script against the following marking scheme:\n\n${JSON.stringify(markingScheme, null, 2)}\n\nFollow the formatting schema and instructions completely.`,
+              text: `Evaluate ALL student handwritten test scripts in this document against the following marking scheme:\n\n${JSON.stringify(markingScheme, null, 2)}\n\nFollow the formatting schema and instructions completely, ensuring you return an array of results for all scripts found.`,
             },
             { type: "image_url", image_url: { url: image } },
           ],
