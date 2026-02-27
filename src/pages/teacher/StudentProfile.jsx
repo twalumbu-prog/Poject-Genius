@@ -201,7 +201,18 @@ export default function StudentProfile() {
             <div className="profile-header-meta">
                 <div className="profile-identity">
                     <h1 className="profile-name">{pupil.name}</h1>
-                    {pupil.grade && <p className="profile-grade">{pupil.grade}</p>}
+                    <div className="profile-tags" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        {pupil.grade && <span className="profile-grade">{pupil.grade}</span>}
+                        {pupil.student_id && <span className="profile-id" style={{
+                            background: 'var(--color-bg-secondary)',
+                            color: 'var(--color-text-secondary)',
+                            padding: '4px 10px',
+                            borderRadius: 'var(--radius-full)',
+                            fontSize: '13px',
+                            fontWeight: 'bold',
+                            border: '1px solid var(--color-border)'
+                        }}>{pupil.student_id}</span>}
+                    </div>
                 </div>
                 <button
                     className="btn-report"

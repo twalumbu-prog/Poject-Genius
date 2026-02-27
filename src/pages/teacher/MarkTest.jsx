@@ -168,17 +168,44 @@ export default function MarkTest() {
 
             // 2. Save or Get Pupil
             let pupilId;
-            const { data: existingPupil } = await supabase
-                .from('pupils')
-                .select('id, grade, student_id')
-                .or(`name.eq."${studentName}",student_id.eq."${studentId}"`)
-                .maybeSingle();
+
+            // First try matching exactly by student_id if provided
+            let existingPupil = null;
+            if (studentId) {
+                const { data } = await supabase
+                    .from('pupils')
+                    .select('id, grade, student_id, name')
+                    .eq('student_id', studentId)
+                    .maybeSingle();
+                existingPupil = data;
+            }
+
+            // Fallback to name match if no ID match found
+            if (!existingPupil && studentName) {
+                const { data } = await supabase
+                    .from('pupils')
+                    .select('id, grade, student_id, name')
+                    .ilike('name', studentName) // use case-insensitive match
+                    .maybeSingle();
+                existingPupil = data;
+            }
 
             if (existingPupil) {
                 pupilId = existingPupil.id;
-                // Update grade or ID if they were missing or changed
-                if (existingPupil.grade !== grade || existingPupil.student_id !== studentId) {
-                    await supabase.from('pupils').update({ grade, student_id: studentId }).eq('id', pupilId);
+
+                // Only update the grade if it was missing
+                const updates = {};
+                if (!existingPupil.grade && grade) {
+                    updates.grade = grade;
+                }
+
+                // Only update the student_id if it was missing (don't overwrite a good ID with a poorly scanned one)
+                if (!existingPupil.student_id && studentId) {
+                    updates.student_id = studentId;
+                }
+
+                if (Object.keys(updates).length > 0) {
+                    await supabase.from('pupils').update(updates).eq('id', pupilId);
                 }
             } else {
                 const { data: newPupil, error: pError } = await supabase
