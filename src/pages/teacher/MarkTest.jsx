@@ -13,6 +13,7 @@ export default function MarkTest() {
     const [markingScheme, setMarkingScheme] = useState(null);
     const [isProcessing, setIsProcessing] = useState(false);
     const [processingStatus, setProcessingStatus] = useState('');
+    const [processingError, setProcessingError] = useState(null);
     const [results, setResults] = useState(null);
     const [loading, setLoading] = useState(true);
     const [pupils, setPupils] = useState([]);
@@ -79,6 +80,7 @@ export default function MarkTest() {
 
         try {
             setIsProcessing(true);
+            setProcessingError(null);
             setProcessingStatus('Analyzing script with AI...');
 
             // Convert to base64
@@ -144,8 +146,23 @@ export default function MarkTest() {
             setResults(null);
         } catch (error) {
             console.error('AI Processing Error:', error);
-            const errorMessage = error?.message || (typeof error === 'string' ? error : "Unknown error occurred.");
-            alert(`AI Marking failed: ${errorMessage}`);
+            const rawMessage = error?.message || (typeof error === 'string' ? error : "Unknown error occurred.");
+
+            // Format lay-friendly explanation based on common error patterns
+            let friendlyMessage = "The AI was unable to read the document successfully. This may happen if the image is too blurry, the text is unreadable, or the AI service is temporarily overloaded.";
+            if (rawMessage.includes('quota') || rawMessage.includes('429')) {
+                friendlyMessage = "The AI service is currently busy. Please wait a moment and try again.";
+            } else if (rawMessage.includes('token') || rawMessage.includes('Unterminated')) {
+                friendlyMessage = "The batch size is too large for the AI to process at once. Please try uploading the scripts in smaller batches (e.g., 2-3 at a time).";
+            } else if (rawMessage.includes('Failed to fetch') || rawMessage.includes('500') || rawMessage.includes('failed')) {
+                friendlyMessage = "We could not connect to the AI grading servers cleanly. Please check your internet connection or try again later.";
+            }
+
+            setProcessingError({
+                title: "Marking Failed",
+                message: friendlyMessage,
+                technicalDetails: rawMessage
+            });
         } finally {
             setIsProcessing(false);
             setProcessingStatus('');
@@ -494,7 +511,32 @@ export default function MarkTest() {
                 </div>
             )}
 
-            {!reviewData && !results && (
+            {processingError && !isProcessing && !reviewData && !results && (
+                <div className="error-banner" style={{ textAlign: 'left', padding: '24px', borderRadius: '12px', background: 'var(--color-error-light)', border: '2px solid var(--color-error)', marginBottom: '24px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                        <AlertCircle size={32} color="var(--color-error)" />
+                        <h3 style={{ margin: 0, color: 'var(--color-error)' }}>{processingError.title}</h3>
+                    </div>
+                    <p style={{ margin: '0 0 16px 0', color: 'var(--color-text-primary)', fontSize: '1.1rem', lineHeight: '1.5' }}>{processingError.message}</p>
+
+                    {processingError.technicalDetails && (
+                        <details style={{ background: 'rgba(255,255,255,0.7)', padding: '12px', borderRadius: '8px', fontSize: '13px', marginBottom: '16px' }}>
+                            <summary style={{ cursor: 'pointer', color: 'var(--color-text-secondary)', fontWeight: 'bold' }}>Technical Details</summary>
+                            <p style={{ marginTop: '8px', fontFamily: 'monospace', wordBreak: 'break-word', color: 'var(--color-error)' }}>{processingError.technicalDetails}</p>
+                        </details>
+                    )}
+
+                    <button
+                        className="btn btn-secondary"
+                        style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px' }}
+                        onClick={() => setProcessingError(null)}
+                    >
+                        Dismiss & Try Again
+                    </button>
+                </div>
+            )}
+
+            {!reviewData && !results && !isProcessing && !processingError && (
                 <div className="mark-options">
                     <div className="mark-option-card" onClick={() => setIsCameraOpen(true)}>
                         <div className="option-icon">
