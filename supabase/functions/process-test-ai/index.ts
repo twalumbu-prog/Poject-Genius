@@ -1,7 +1,6 @@
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 
-// Helper to clean and repair JSON string
 function cleanRepairAndParseJson(text: string) {
   let cleaned = text.replace(/^```json\s*/, "").replace(/^```\s*/, "").replace(/\s*```$/, "").trim();
 
@@ -10,19 +9,36 @@ function cleanRepairAndParseJson(text: string) {
   } catch (e) {
     if (cleaned.length > 100) { // Only try repair if we have substantial content
       console.warn("JSON parse failed, attempting repair of truncated JSON...");
-      // Find the last closing brace '}' which likely closes a question object
+
+      // Since it's an array of results now `{ "results": [ { ... } ] }`
+      // Try appending standard closing tags sequentially to recover as much as possible
+      const rescueAttempts = [
+        cleaned + '"]}]}', // Close unclosed string, object, array, wrapping object
+        cleaned + '"}]}',  // Close unclosed string, object, wrapping object
+        cleaned + '}]}',   // Close unclosed object, array, wrapping object
+        cleaned + ']}',    // Close unclosed array, wrapping object
+        cleaned + '}'      // Close unclosed wrapping object
+      ];
+
+      for (const attempt of rescueAttempts) {
+        try {
+          return JSON.parse(attempt);
+        } catch (e2) {
+          // keep trying
+        }
+      }
+
+      // If simple appendage fails, try finding the last complete object bracket
       const lastBrace = cleaned.lastIndexOf('}');
       if (lastBrace > -1) {
         const truncated = cleaned.substring(0, lastBrace + 1);
-        // Try closing the array and object: { "questions": [ ... ] }
         try {
           return JSON.parse(truncated + ']}');
-        } catch (e2) {
-          // Try closing just the object (if array wasn't open or already closed?)
+        } catch (e3) {
           try {
             return JSON.parse(truncated + '}');
-          } catch (e3) {
-            console.error("Repair failed.");
+          } catch (e4) {
+            console.error("Advanced repair failed.");
           }
         }
       }
