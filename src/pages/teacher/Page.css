@@ -585,6 +585,12 @@
     align-items: start;
 }
 
+.review-content.vertically-stacked {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: var(--spacing-lg) !important;
+}
+
 .review-image-pane {
     position: sticky;
     top: var(--spacing-xl);

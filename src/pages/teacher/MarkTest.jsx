@@ -22,7 +22,7 @@ export default function MarkTest() {
 
     const [scannedImage, setScannedImage] = useState(null);
     const [isCameraOpen, setIsCameraOpen] = useState(false);
-    const [activeTab, setActiveTab] = useState('script'); // 'script' or 'answers' for mobile
+    const [showAnswers, setShowAnswers] = useState(false);
     const [videoRef, setVideoRef] = useState(null);
     const [showLightbox, setShowLightbox] = useState(false);
 
@@ -490,20 +490,6 @@ export default function MarkTest() {
                 <div className="review-interface">
                     <div className="review-header">
                         <h2>Review Extraction ({currentReviewIndex + 1} of {reviewBatch.length})</h2>
-                        <div className="review-tabs">
-                            <button
-                                className={`tab-btn ${activeTab === 'script' ? 'active' : ''}`}
-                                onClick={() => setActiveTab('script')}
-                            >
-                                View Script
-                            </button>
-                            <button
-                                className={`tab-btn ${activeTab === 'answers' ? 'active' : ''}`}
-                                onClick={() => setActiveTab('answers')}
-                            >
-                                Verify Answers
-                            </button>
-                        </div>
                         <div className="review-actions">
                             <button className="btn btn-secondary" onClick={() => { setReviewBatch(null); setBatchResults([]); }}>Cancel</button>
                             <button className="btn btn-primary" onClick={handleSaveResult}>
@@ -512,16 +498,16 @@ export default function MarkTest() {
                         </div>
                     </div>
 
-                    <div className={`review-content mobile-tab-${activeTab}`}>
-                        <div className="review-image-pane">
-                            <h3>Scanned Script</h3>
-                            <p className="hint-text">Click image to enlarge</p>
-                            <div className="image-container" onClick={() => setShowLightbox(true)}>
-                                <img src={scannedImage} alt="Scanned Script" />
-                            </div>
-                        </div>
+                    <div className="review-content vertically-stacked">
+                        <button
+                            className="btn btn-secondary"
+                            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                            onClick={() => setShowLightbox(true)}
+                        >
+                            <Camera size={20} /> View Scanned Script
+                        </button>
 
-                        <div className="review-data-pane">
+                        <div className="review-data-pane" style={{ width: '100%' }}>
                             <div className="student-info-review">
                                 <div className="field-group">
                                     <label>Student Name</label>
@@ -556,34 +542,46 @@ export default function MarkTest() {
                                 </div>
                             </div>
 
-                            <h3>Verification</h3>
-                            <div className="review-answers-list">
-                                {reviewData.studentAnswers.map((ans, idx) => (
-                                    <div key={idx} className={`review-item ${ans.confidence === 'Low' || !ans.student_answer ? 'review-warning' : ''}`}>
-                                        <div className="review-item-header">
-                                            <span className="q-circle">Q{ans.question_number}</span>
-                                            <span className={`status-badge ${ans.is_correct ? 'correct' : 'incorrect'}`}>
-                                                {ans.is_correct ? 'Correct' : 'Incorrect'}
-                                            </span>
-                                        </div>
-                                        <div className="review-item-body">
-                                            <div className="field-group">
-                                                <label>Extracted Answer</label>
-                                                <input
-                                                    type="text"
-                                                    value={ans.student_answer}
-                                                    onChange={(e) => updateReviewAnswer(idx, 'student_answer', e.target.value)}
-                                                />
-                                            </div>
-                                            {ans.feedback && (
-                                                <div className="review-note">
-                                                    <strong>AI Note:</strong> {ans.feedback}
+                            <button
+                                className="btn btn-secondary"
+                                style={{ width: '100%', marginTop: '16px', marginBottom: '16px' }}
+                                onClick={() => setShowAnswers(!showAnswers)}
+                            >
+                                {showAnswers ? 'Hide Answer Sheets' : 'View Answer Sheets'}
+                            </button>
+
+                            {showAnswers && (
+                                <>
+                                    <h3>Verification</h3>
+                                    <div className="review-answers-list" style={{ width: '100%' }}>
+                                        {reviewData.studentAnswers.map((ans, idx) => (
+                                            <div key={idx} className={`review-item ${ans.confidence === 'Low' || !ans.student_answer ? 'review-warning' : ''}`}>
+                                                <div className="review-item-header">
+                                                    <span className="q-circle">Q{ans.question_number}</span>
+                                                    <span className={`status-badge ${ans.is_correct ? 'correct' : 'incorrect'}`}>
+                                                        {ans.is_correct ? 'Correct' : 'Incorrect'}
+                                                    </span>
                                                 </div>
-                                            )}
-                                        </div>
+                                                <div className="review-item-body">
+                                                    <div className="field-group">
+                                                        <label>Extracted Answer</label>
+                                                        <input
+                                                            type="text"
+                                                            value={ans.student_answer}
+                                                            onChange={(e) => updateReviewAnswer(idx, 'student_answer', e.target.value)}
+                                                        />
+                                                    </div>
+                                                    {ans.feedback && (
+                                                        <div className="review-note">
+                                                            <strong>AI Note:</strong> {ans.feedback}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
-                                ))}
-                            </div>
+                                </>
+                            )}
                         </div>
                     </div>
                 </div>
