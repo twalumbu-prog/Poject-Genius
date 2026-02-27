@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
-import { ArrowLeft, Camera, Upload, Loader, CheckCircle, AlertCircle, Sparkles } from 'lucide-react';
+import { ArrowLeft, Camera, Upload, Loader, CheckCircle, AlertCircle, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
 import { createWorker } from 'tesseract.js';
 import { applyDocScanFilter } from '../../utils/imageProcessing';
 import './Page.css';
@@ -507,7 +507,7 @@ export default function MarkTest() {
                             <Camera size={20} /> View Scanned Script
                         </button>
 
-                        <div className="review-data-pane" style={{ width: '100%' }}>
+                        <div className="review-data-pane" style={{ width: '100%', flexDirection: 'column' }}>
                             <div className="student-info-review">
                                 <div className="field-group">
                                     <label>Student Name</label>
@@ -543,11 +543,22 @@ export default function MarkTest() {
                             </div>
 
                             <button
-                                className="btn btn-secondary"
-                                style={{ width: '100%', marginTop: '16px', marginBottom: '16px' }}
+                                className="btn"
+                                style={{
+                                    width: '100%',
+                                    marginTop: '16px',
+                                    marginBottom: '16px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    background: 'var(--color-bg-secondary)',
+                                    border: '2px solid var(--color-border)',
+                                    color: 'var(--color-text-primary)'
+                                }}
                                 onClick={() => setShowAnswers(!showAnswers)}
                             >
-                                {showAnswers ? 'Hide Answer Sheets' : 'View Answer Sheets'}
+                                <span style={{ fontWeight: 'bold' }}>{showAnswers ? 'Hide Answer Sheets' : 'View Answer Sheets'}</span>
+                                {showAnswers ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
                             </button>
 
                             {showAnswers && (
