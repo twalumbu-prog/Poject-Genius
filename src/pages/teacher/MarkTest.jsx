@@ -243,7 +243,7 @@ export default function MarkTest() {
                     answers: studentAnswers,
                     score,
                     percentage
-                })
+                }, { onConflict: 'test_id,pupil_id' })
                 .select()
                 .single();
 
