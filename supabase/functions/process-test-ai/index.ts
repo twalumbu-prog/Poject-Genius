@@ -7,41 +7,50 @@ function cleanRepairAndParseJson(text: string) {
   try {
     return JSON.parse(cleaned);
   } catch (e) {
-    if (cleaned.length > 100) { // Only try repair if we have substantial content
-      console.warn("JSON parse failed, attempting repair of truncated JSON...");
+    if (cleaned.length > 100) {
+      console.warn("JSON parse failed, attempting aggressive repair of truncated JSON...");
 
-      // Since it's an array of results now `{ "results": [ { ... } ] }`
-      // Try appending standard closing tags sequentially to recover as much as possible
+      // 1. First, try simple bracket appendages for cleanly cut strings
       const rescueAttempts = [
-        cleaned + '"]}]}', // Close unclosed string, object, array, wrapping object
-        cleaned + '"}]}',  // Close unclosed string, object, wrapping object
-        cleaned + '}]}',   // Close unclosed object, array, wrapping object
-        cleaned + ']}',    // Close unclosed array, wrapping object
-        cleaned + '}'      // Close unclosed wrapping object
+        cleaned + '"]}]}',
+        cleaned + '"}]}',
+        cleaned + '}]}',
+        cleaned + ']}',
+        cleaned + '}'
       ];
 
       for (const attempt of rescueAttempts) {
-        try {
-          return JSON.parse(attempt);
-        } catch (e2) {
-          // keep trying
+        try { return JSON.parse(attempt); } catch (e2) { }
+      }
+
+      // 2. If it cut off mid-property-name or mid-value (e.g., "feedback": "Studen...), 
+      // we need to slice it back to the last successfully closed object }
+
+      // Look for the last "}," which usually indicates the end of a question object or a student object inside an array
+      let lastGoodBoundary = cleaned.lastIndexOf('},');
+
+      if (lastGoodBoundary === -1) {
+        // If no comma, just look for the last closing brace
+        lastGoodBoundary = cleaned.lastIndexOf('}');
+      }
+
+      if (lastGoodBoundary > -1) {
+        // Cut the string right after that valid closing brace
+        const truncated = cleaned.substring(0, lastGoodBoundary + 1);
+
+        // Now try closing the outer structures
+        const structuralRepairs = [
+          truncated + ']}',   // If it was inside the answers array
+          truncated + ']} ]}', // If it was inside the results array
+          truncated + ']}'    // If it was just results array
+        ];
+
+        for (const structuralAttempt of structuralRepairs) {
+          try { return JSON.parse(structuralAttempt); } catch (e3) { }
         }
       }
 
-      // If simple appendage fails, try finding the last complete object bracket
-      const lastBrace = cleaned.lastIndexOf('}');
-      if (lastBrace > -1) {
-        const truncated = cleaned.substring(0, lastBrace + 1);
-        try {
-          return JSON.parse(truncated + ']}');
-        } catch (e3) {
-          try {
-            return JSON.parse(truncated + '}');
-          } catch (e4) {
-            console.error("Advanced repair failed.");
-          }
-        }
-      }
+      console.error("All aggressive repair attempts failed.");
     }
     throw e;
   }
