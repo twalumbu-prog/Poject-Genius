@@ -26,6 +26,7 @@ export default function MarkTest() {
     const [showAnswers, setShowAnswers] = useState(false);
     const [videoRef, setVideoRef] = useState(null);
     const [showLightbox, setShowLightbox] = useState(false);
+    const [duplicatePrompt, setDuplicatePrompt] = useState(null);
 
     const reviewData = reviewBatch ? reviewBatch[currentReviewIndex] : null;
 
@@ -169,7 +170,7 @@ export default function MarkTest() {
         }
     };
 
-    const handleSaveResult = async () => {
+    const handleSaveResult = async (forceOverwrite = false) => {
         if (!reviewData) return;
 
         try {
@@ -234,7 +235,28 @@ export default function MarkTest() {
                 pupilId = newPupil.id;
             }
 
-            // 3. Save Result
+            // 3. Check for existing result to Prevent Accidental Overwrites
+            if (!forceOverwrite) {
+                const { data: existingResult } = await supabase
+                    .from('results')
+                    .select('id, score')
+                    .eq('test_id', testId)
+                    .eq('pupil_id', pupilId)
+                    .maybeSingle();
+
+                if (existingResult) {
+                    setIsProcessing(false);
+                    setDuplicatePrompt({
+                        studentName,
+                        existingScore: existingResult.score,
+                        newScore: score,
+                        pupilId
+                    });
+                    return; // Pause the save process and wait for user decision
+                }
+            }
+
+            // 4. Save Result (Insert or Overwrite confirmed)
             const { data: result, error: resError } = await supabase
                 .from('results')
                 .upsert({
@@ -297,13 +319,15 @@ export default function MarkTest() {
 
             if (analysisError) throw analysisError;
 
-            const newBatchResults = [...batchResults, { studentName, score, percentage, correctCount, studentAnswers }];
-            setBatchResults(newBatchResults);
+            // 5. Success - Move to next or show final results
+            const updatedBatchResults = [...batchResults, { ...reviewData, score, percentage }];
+            setBatchResults(updatedBatchResults);
+            setDuplicatePrompt(null);
 
             if (currentReviewIndex < reviewBatch.length - 1) {
                 setCurrentReviewIndex(currentReviewIndex + 1);
             } else {
-                setResults(newBatchResults);
+                setResults(updatedBatchResults);
                 setReviewBatch(null);
                 setCurrentReviewIndex(0);
             }
@@ -561,7 +585,7 @@ export default function MarkTest() {
                         <h2>Review Extraction ({currentReviewIndex + 1} of {reviewBatch.length})</h2>
                         <div className="review-actions">
                             <button className="btn btn-secondary" onClick={() => { setReviewBatch(null); setBatchResults([]); }}>Cancel</button>
-                            <button className="btn btn-primary" onClick={handleSaveResult}>
+                            <button className="btn btn-primary" onClick={() => handleSaveResult(false)}>
                                 {currentReviewIndex < reviewBatch.length - 1 ? 'Save & Next' : 'Confirm & Save All'}
                             </button>
                         </div>
@@ -629,6 +653,38 @@ export default function MarkTest() {
                                 <span style={{ fontWeight: 'bold' }}>{showAnswers ? 'Hide Answer Sheets' : 'View Answer Sheets'}</span>
                                 {showAnswers ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
                             </button>
+
+                            {duplicatePrompt && (
+                                <div className="duplicate-alert" style={{
+                                    marginTop: '24px', padding: '20px', borderRadius: '12px',
+                                    background: 'var(--color-bg-secondary)', border: '2px solid var(--color-accent-primary)',
+                                    textAlign: 'center'
+                                }}>
+                                    <AlertCircle size={32} color="var(--color-accent-primary)" style={{ margin: '0 auto 12px' }} />
+                                    <h3 style={{ color: 'var(--color-text-primary)', marginBottom: '8px', margin: 0 }}>Existing Score Found</h3>
+                                    <p style={{ margin: '0 0 16px 0', color: 'var(--color-text-secondary)' }}>
+                                        <strong>{duplicatePrompt.studentName}</strong> already has a saved score of {duplicatePrompt.existingScore}/{markingScheme.questions.length} for this test.
+                                        <br />This new scan scored {duplicatePrompt.newScore}/{markingScheme.questions.length}.
+                                    </p>
+                                    <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                                        <button className="btn btn-secondary" onClick={() => {
+                                            setDuplicatePrompt(null);
+                                            // Handle Skip: move to next student in batch
+                                            if (currentReviewIndex < reviewBatch.length - 1) {
+                                                setCurrentReviewIndex(currentReviewIndex + 1);
+                                            } else {
+                                                setResults(batchResults);
+                                                setReviewBatch(null);
+                                            }
+                                        }}>
+                                            Skip & Keep Old Score
+                                        </button>
+                                        <button className="btn btn-primary" style={{ background: 'var(--color-accent-primary)' }} onClick={() => handleSaveResult(true)}>
+                                            Update with New Score
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
 
                             {showAnswers && (
                                 <>
