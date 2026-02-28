@@ -461,74 +461,111 @@ export default function MarkTest() {
 
                                 const rawBase64 = canvas.toDataURL('image/jpeg', 0.9);
 
-                                // Stop camera
+                                // Push to state array instead of processing immediately
+                                setCapturedImages(prev => [...prev, rawBase64]);
+                            }}>
+                                <Camera size={24} />
+                                Capture Script
+                            </button>
+
+                            {capturedImages.length > 0 && (
+                                <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', padding: '12px 0' }}>
+                                    {capturedImages.map((img, i) => (
+                                        <div key={i} style={{ position: 'relative', width: '60px', height: '80px', flexShrink: 0 }}>
+                                            <img src={img} alt={`Capture ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '4px', border: '2px solid var(--color-accent-primary)' }} />
+                                            <div style={{ position: 'absolute', top: '-6px', right: '-6px', background: 'var(--color-accent-primary)', color: 'white', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold' }}>{i + 1}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {capturedImages.length > 0 && (
+                                <button className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }} onClick={async () => {
+                                    // Stop camera
+                                    if (videoRef.srcObject) {
+                                        videoRef.srcObject.getTracks().forEach(track => track.stop());
+                                    }
+                                    setIsCameraOpen(false);
+
+                                    try {
+                                        setIsProcessing(true);
+
+                                        // 1. Apply document scan filter to all captured images sequentially
+                                        setProcessingStatus(`Enhancing ${capturedImages.length} images...`);
+                                        const filteredImages = await Promise.all(
+                                            capturedImages.map(img => applyDocScanFilter(img))
+                                        );
+
+                                        // 2. Trigger AI marking directly with batch
+                                        setProcessingStatus(`Analyzing ${capturedImages.length} scripts with AI...`);
+                                        const response = await fetch(
+                                            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-test-ai`,
+                                            {
+                                                method: 'POST',
+                                                headers: {
+                                                    'Content-Type': 'application/json',
+                                                    'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+                                                    'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+                                                },
+                                                body: JSON.stringify({
+                                                    mode: 'mark_script',
+                                                    images: filteredImages,
+                                                    markingScheme: markingScheme.questions,
+                                                    geminiKey: import.meta.env.VITE_GEMINI_API_KEY
+                                                })
+                                            }
+                                        );
+
+                                        if (!response.ok) throw new Error("AI failed");
+                                        const data = await response.json();
+
+                                        const resultsArray = data.results || [data];
+                                        const parsedBatch = resultsArray.map(studentData => ({
+                                            studentName: studentData.studentName || '',
+                                            studentId: studentData.student_id || '',
+                                            grade: studentData.grade || '',
+                                            studentAnswers: markingScheme.questions.map(q => {
+                                                const aiAns = studentData.answers?.find(a => a.question_number === q.question_number);
+                                                return {
+                                                    question_number: q.question_number,
+                                                    student_answer: aiAns?.student_answer || '',
+                                                    is_correct: aiAns ? aiAns.is_correct : false,
+                                                    feedback: aiAns?.feedback || (aiAns ? '' : 'Missing from extraction'),
+                                                    confidence: aiAns?.confidence || 'Low',
+                                                    topic: q.topic
+                                                };
+                                            })
+                                        }));
+
+                                        // Use the first image for the review UI representing the batch
+                                        setScannedImage(filteredImages[0]);
+                                        setReviewBatch(parsedBatch);
+                                        setCurrentReviewIndex(0);
+                                        setBatchResults([]);
+                                        setResults(null);
+                                        setCapturedImages([]); // Reset on success
+                                    } catch (error) {
+                                        console.error('Scan Error:', error);
+                                        const errorMessage = error?.message || (typeof error === 'string' ? error : "Unknown error occurred.");
+                                        alert(`Scan failed: ${errorMessage}`);
+                                    } finally {
+                                        setIsProcessing(false);
+                                        setProcessingStatus('');
+                                    }
+                                }}>
+                                    <CheckCircle size={24} />
+                                    Done Scanning ({capturedImages.length})
+                                </button>
+                            )}
+
+                            <button className="btn btn-secondary" style={{ width: '100%', marginTop: '8px' }} onClick={() => {
                                 if (videoRef.srcObject) {
                                     videoRef.srcObject.getTracks().forEach(track => track.stop());
                                 }
                                 setIsCameraOpen(false);
-
-                                // Process as if it was uploaded
-                                try {
-                                    setIsProcessing(true);
-                                    setProcessingStatus('Crunching handwriting...');
-                                    const filteredBase64 = await applyDocScanFilter(rawBase64);
-
-                                    // Trigger AI marking directly
-                                    setProcessingStatus('Analyzing script with AI...');
-                                    const response = await fetch(
-                                        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-test-ai`,
-                                        {
-                                            method: 'POST',
-                                            headers: {
-                                                'Content-Type': 'application/json',
-                                                'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-                                                'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-                                            },
-                                            body: JSON.stringify({
-                                                mode: 'mark_script',
-                                                image: filteredBase64,
-                                                markingScheme: markingScheme.questions,
-                                                geminiKey: import.meta.env.VITE_GEMINI_API_KEY
-                                            })
-                                        }
-                                    );
-
-                                    if (!response.ok) throw new Error("AI failed");
-                                    const data = await response.json();
-
-                                    const resultsArray = data.results || [data];
-                                    const parsedBatch = resultsArray.map(studentData => ({
-                                        studentName: studentData.studentName || '',
-                                        studentId: studentData.student_id || '',
-                                        grade: studentData.grade || '',
-                                        studentAnswers: markingScheme.questions.map(q => {
-                                            const aiAns = studentData.answers?.find(a => a.question_number === q.question_number);
-                                            return {
-                                                question_number: q.question_number,
-                                                student_answer: aiAns?.student_answer || '',
-                                                is_correct: aiAns ? aiAns.is_correct : false,
-                                                feedback: aiAns?.feedback || (aiAns ? '' : 'Missing from extraction'),
-                                                confidence: aiAns?.confidence || 'Low',
-                                                topic: q.topic
-                                            };
-                                        })
-                                    }));
-                                    setScannedImage(filteredBase64);
-                                    setReviewBatch(parsedBatch);
-                                    setCurrentReviewIndex(0);
-                                    setBatchResults([]);
-                                    setResults(null);
-                                } catch (error) {
-                                    console.error('Scan Error:', error);
-                                    const errorMessage = error?.message || (typeof error === 'string' ? error : "Unknown error occurred.");
-                                    alert(`Scan failed: ${errorMessage}`);
-                                } finally {
-                                    setIsProcessing(false);
-                                    setProcessingStatus('');
-                                }
+                                setCapturedImages([]); // Reset if cancelled
                             }}>
-                                <Camera size={24} />
-                                Capture Script
+                                Cancel Focus
                             </button>
                         </div>
                     </div>

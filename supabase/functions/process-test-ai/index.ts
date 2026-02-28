@@ -260,7 +260,12 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json();
-    const { mode, image, markingScheme, testParams, geminiKey } = body;
+    const { mode, image, images, markingScheme, testParams, geminiKey } = body;
+
+    const buildImageParts = () => {
+      const allImages = images || (image ? [image] : []);
+      return allImages.map((img: string) => ({ type: "image_url", image_url: { url: img } }));
+    };
 
     const activeGeminiKey = geminiKey || GEMINI_API_KEY;
 
@@ -374,14 +379,14 @@ Response Schema:
               type: "text",
               text: 'Analyze this test paper image. Extract all questions, options, and correct answers (if marked) according to the strict JSON schema provided.',
             },
-            { type: "image_url", image_url: { url: image } },
+            ...buildImageParts(),
           ],
         },
       ];
     } else if (mode === "mark_script") {
 
-      if (!image || !markingScheme) {
-        throw new Error("image and markingScheme are required");
+      if ((!image && (!images || images.length === 0)) || !markingScheme) {
+        throw new Error("image(s) and markingScheme are required");
       }
 
       messages = [
@@ -425,7 +430,7 @@ Response Schema:
               type: "text",
               text: `Evaluate ALL student handwritten test scripts in this document against the following marking scheme:\n\n${JSON.stringify(markingScheme, null, 2)}\n\nFollow the formatting schema and instructions completely, ensuring you return an array of results for all scripts found.`,
             },
-            { type: "image_url", image_url: { url: image } },
+            ...buildImageParts(),
           ],
         },
       ];
