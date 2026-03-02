@@ -27,6 +27,7 @@ export default function MarkTest() {
     const [videoRef, setVideoRef] = useState(null);
     const [showLightbox, setShowLightbox] = useState(false);
     const [duplicatePrompt, setDuplicatePrompt] = useState(null);
+    const [capturedImages, setCapturedImages] = useState([]);
 
     const reviewData = reviewBatch ? reviewBatch[currentReviewIndex] : null;
 
@@ -108,7 +109,7 @@ export default function MarkTest() {
                     },
                     body: JSON.stringify({
                         mode: 'mark_script',
-                        image: base64Image,
+                        images: [filteredBase64],
                         markingScheme: markingScheme.questions,
                         geminiKey: import.meta.env.VITE_GEMINI_API_KEY
                     })
@@ -140,7 +141,8 @@ export default function MarkTest() {
                 })
             }));
 
-            setScannedImage(base64Image);
+            // Just store the first image as the representative scan for the review UI for now
+            setScannedImage(filteredBase64);
             setReviewBatch(parsedBatch);
             setCurrentReviewIndex(0);
             setBatchResults([]);
