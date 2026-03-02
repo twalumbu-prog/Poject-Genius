@@ -440,38 +440,10 @@ export default function MarkTest() {
                                 <div className="scanner-frame"></div>
                             </div>
                         </div>
-                        <div className="camera-footer">
-                            <button className="btn btn-primary btn-capture" onClick={async () => {
-                                if (!videoRef) return;
-
-                                const canvas = document.createElement('canvas');
-                                const videoWidth = videoRef.videoWidth;
-                                const videoHeight = videoRef.videoHeight;
-
-                                // Calculate the A4 Crop Box (Matching .scanner-frame CSS: 80% width, 70% height)
-                                const cropWidth = videoWidth * 0.8;
-                                const cropHeight = videoHeight * 0.7;
-                                const cropX = (videoWidth - cropWidth) / 2;
-                                const cropY = (videoHeight - cropHeight) / 2;
-
-                                canvas.width = cropWidth;
-                                canvas.height = cropHeight;
-
-                                const ctx = canvas.getContext('2d');
-                                // Draw only the cropped portion
-                                ctx.drawImage(videoRef, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
-
-                                const rawBase64 = canvas.toDataURL('image/jpeg', 0.9);
-
-                                // Push to state array instead of processing immediately
-                                setCapturedImages(prev => [...prev, rawBase64]);
-                            }}>
-                                <Camera size={24} />
-                                Capture Script
-                            </button>
-
+                        <div className="camera-footer" style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '16px', width: '100%', background: 'var(--bg-card)', zIndex: 10 }}>
+                            {/* Scanned images strip ABOVE the action buttons */}
                             {capturedImages.length > 0 && (
-                                <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', padding: '12px 0' }}>
+                                <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '4px' }}>
                                     {capturedImages.map((img, i) => (
                                         <div key={i} style={{ position: 'relative', width: '60px', height: '80px', flexShrink: 0 }}>
                                             <img src={img} alt={`Capture ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '4px', border: '2px solid var(--color-accent-primary)' }} />
@@ -481,94 +453,122 @@ export default function MarkTest() {
                                 </div>
                             )}
 
-                            {capturedImages.length > 0 && (
-                                <button className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }} onClick={async () => {
-                                    // Stop camera
-                                    if (videoRef.srcObject) {
-                                        videoRef.srcObject.getTracks().forEach(track => track.stop());
-                                    }
-                                    setIsCameraOpen(false);
+                            {/* Button controls row (side-by-side if multiple) */}
+                            <div style={{ display: 'flex', gap: '12px', width: '100%' }}>
+                                <button
+                                    className="btn btn-secondary"
+                                    style={{ flex: 1, padding: '16px', fontSize: '1.1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                                    onClick={async () => {
+                                        if (!videoRef) return;
 
-                                    try {
-                                        setIsProcessing(true);
+                                        const canvas = document.createElement('canvas');
+                                        const videoWidth = videoRef.videoWidth;
+                                        const videoHeight = videoRef.videoHeight;
 
-                                        // 1. Apply document scan filter to all captured images sequentially
-                                        setProcessingStatus(`Enhancing ${capturedImages.length} images...`);
-                                        const filteredImages = await Promise.all(
-                                            capturedImages.map(img => applyDocScanFilter(img))
-                                        );
+                                        // Calculate the A4 Crop Box (Matching .scanner-frame CSS: 80% width, 70% height)
+                                        const cropWidth = videoWidth * 0.8;
+                                        const cropHeight = videoHeight * 0.7;
+                                        const cropX = (videoWidth - cropWidth) / 2;
+                                        const cropY = (videoHeight - cropHeight) / 2;
 
-                                        // 2. Trigger AI marking directly with batch
-                                        setProcessingStatus(`Analyzing ${capturedImages.length} scripts with AI...`);
-                                        const response = await fetch(
-                                            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-test-ai`,
-                                            {
-                                                method: 'POST',
-                                                headers: {
-                                                    'Content-Type': 'application/json',
-                                                    'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-                                                    'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-                                                },
-                                                body: JSON.stringify({
-                                                    mode: 'mark_script',
-                                                    images: filteredImages,
-                                                    markingScheme: markingScheme.questions,
-                                                    geminiKey: import.meta.env.VITE_GEMINI_API_KEY
-                                                })
-                                            }
-                                        );
+                                        canvas.width = cropWidth;
+                                        canvas.height = cropHeight;
 
-                                        if (!response.ok) throw new Error("AI failed");
-                                        const data = await response.json();
+                                        const ctx = canvas.getContext('2d');
+                                        // Draw only the cropped portion
+                                        ctx.drawImage(videoRef, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
 
-                                        const resultsArray = data.results || [data];
-                                        const parsedBatch = resultsArray.map(studentData => ({
-                                            studentName: studentData.studentName || '',
-                                            studentId: studentData.student_id || '',
-                                            grade: studentData.grade || '',
-                                            studentAnswers: markingScheme.questions.map(q => {
-                                                const aiAns = studentData.answers?.find(a => a.question_number === q.question_number);
-                                                return {
-                                                    question_number: q.question_number,
-                                                    student_answer: aiAns?.student_answer || '',
-                                                    is_correct: aiAns ? aiAns.is_correct : false,
-                                                    feedback: aiAns?.feedback || (aiAns ? '' : 'Missing from extraction'),
-                                                    confidence: aiAns?.confidence || 'Low',
-                                                    topic: q.topic
-                                                };
-                                            })
-                                        }));
+                                        const rawBase64 = canvas.toDataURL('image/jpeg', 0.9);
 
-                                        // Use the first image for the review UI representing the batch
-                                        setScannedImage(filteredImages[0]);
-                                        setReviewBatch(parsedBatch);
-                                        setCurrentReviewIndex(0);
-                                        setBatchResults([]);
-                                        setResults(null);
-                                        setCapturedImages([]); // Reset on success
-                                    } catch (error) {
-                                        console.error('Scan Error:', error);
-                                        const errorMessage = error?.message || (typeof error === 'string' ? error : "Unknown error occurred.");
-                                        alert(`Scan failed: ${errorMessage}`);
-                                    } finally {
-                                        setIsProcessing(false);
-                                        setProcessingStatus('');
-                                    }
-                                }}>
-                                    <CheckCircle size={24} />
-                                    Done Scanning ({capturedImages.length})
+                                        // Push to state array instead of processing immediately
+                                        setCapturedImages(prev => [...prev, rawBase64]);
+                                    }}>
+                                    <Camera size={24} />
+                                    Scan
                                 </button>
-                            )}
 
-                            <button className="btn btn-secondary" style={{ width: '100%', marginTop: '8px' }} onClick={() => {
-                                if (videoRef.srcObject) {
-                                    videoRef.srcObject.getTracks().forEach(track => track.stop());
-                                }
-                                setIsCameraOpen(false);
-                                setCapturedImages([]); // Reset if cancelled
-                            }}>
-                                Cancel Focus
-                            </button>
+                                {capturedImages.length > 0 && (
+                                    <button
+                                        className="btn btn-primary"
+                                        style={{ flex: 1, padding: '16px', fontSize: '1.1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                                        onClick={async () => {
+                                            // Stop camera
+                                            if (videoRef.srcObject) {
+                                                videoRef.srcObject.getTracks().forEach(track => track.stop());
+                                            }
+                                            setIsCameraOpen(false);
+
+                                            try {
+                                                setIsProcessing(true);
+
+                                                // 1. Apply document scan filter to all captured images sequentially
+                                                setProcessingStatus(`Enhancing ${capturedImages.length} images...`);
+                                                const filteredImages = await Promise.all(
+                                                    capturedImages.map(img => applyDocScanFilter(img))
+                                                );
+
+                                                // 2. Trigger AI marking directly with batch
+                                                setProcessingStatus(`Analyzing ${capturedImages.length} scripts with AI...`);
+                                                const response = await fetch(
+                                                    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-test-ai`,
+                                                    {
+                                                        method: 'POST',
+                                                        headers: {
+                                                            'Content-Type': 'application/json',
+                                                            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+                                                            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+                                                        },
+                                                        body: JSON.stringify({
+                                                            mode: 'mark_script',
+                                                            images: filteredImages,
+                                                            markingScheme: markingScheme.questions,
+                                                            geminiKey: import.meta.env.VITE_GEMINI_API_KEY
+                                                        })
+                                                    }
+                                                );
+
+                                                if (!response.ok) throw new Error("AI failed");
+                                                const data = await response.json();
+
+                                                const resultsArray = data.results || [data];
+                                                const parsedBatch = resultsArray.map(studentData => ({
+                                                    studentName: studentData.studentName || '',
+                                                    studentId: studentData.student_id || '',
+                                                    grade: studentData.grade || '',
+                                                    studentAnswers: markingScheme.questions.map(q => {
+                                                        const aiAns = studentData.answers?.find(a => a.question_number === q.question_number);
+                                                        return {
+                                                            question_number: q.question_number,
+                                                            student_answer: aiAns?.student_answer || '',
+                                                            is_correct: aiAns ? aiAns.is_correct : false,
+                                                            feedback: aiAns?.feedback || (aiAns ? '' : 'Missing from extraction'),
+                                                            confidence: aiAns?.confidence || 'Low',
+                                                            topic: q.topic
+                                                        };
+                                                    })
+                                                }));
+
+                                                // Use the first image for the review UI representing the batch
+                                                setScannedImage(filteredImages[0]);
+                                                setReviewBatch(parsedBatch);
+                                                setCurrentReviewIndex(0);
+                                                setBatchResults([]);
+                                                setResults(null);
+                                                setCapturedImages([]); // Reset on success
+                                            } catch (error) {
+                                                console.error('Scan Error:', error);
+                                                const errorMessage = error?.message || (typeof error === 'string' ? error : "Unknown error occurred.");
+                                                alert(`Scan failed: ${errorMessage}`);
+                                            } finally {
+                                                setIsProcessing(false);
+                                                setProcessingStatus('');
+                                            }
+                                        }}>
+                                        <CheckCircle size={24} />
+                                        Process ({capturedImages.length})
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
