@@ -440,7 +440,7 @@ export default function MarkTest() {
                                 <div className="scanner-frame"></div>
                             </div>
                         </div>
-                        <div className="camera-footer" style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '16px', width: '100%', background: 'var(--bg-card)', zIndex: 10 }}>
+                        <div className="camera-footer" style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '16px', width: '100%', background: 'var(--bg-card)', zIndex: 10, position: 'absolute', bottom: 0, left: 0 }}>
                             {/* Scanned images strip ABOVE the action buttons */}
                             {capturedImages.length > 0 && (
                                 <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '4px' }}>

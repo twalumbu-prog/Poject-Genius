@@ -389,6 +389,8 @@ Response Schema:
         throw new Error("image(s) and markingScheme are required");
       }
 
+      const numImages = (images && images.length > 0) ? images.length : 1;
+
       messages = [
         {
           role: "system",
@@ -396,7 +398,7 @@ Response Schema:
 Always respond with strictly valid JSON.
 
 CRITICAL INSTRUCTIONS:
-1. Identify all distinct student scripts in the document.
+1. Identify all distinct student scripts in the document. You have been provided with ${numImages} image(s). If there are multiple images, assume EACH image is a separate student's test script.
 2. For each student script, extract the student's name from the top of the paper. If unreadable, return "Unknown".
 3. Evaluate the student's handwritten answer for each question against the correct answer in the marking scheme.
 4. If handwriting is crossed out, ignore the crossed-out part and evaluate the latest answer.
@@ -428,7 +430,7 @@ Response Schema:
           content: [
             {
               type: "text",
-              text: `Evaluate ALL student handwritten test scripts in this document against the following marking scheme:\n\n${JSON.stringify(markingScheme, null, 2)}\n\nFollow the formatting schema and instructions completely, ensuring you return an array of results for all scripts found.`,
+              text: `Evaluate these ${numImages} student handwritten test script(s) against the following marking scheme:\n\n${JSON.stringify(markingScheme, null, 2)}\n\nIMPORTANT: You must output a distinct result object in the "results" array for EACH unique student script you identify. Since there are ${numImages} images, expect to output at least ${numImages} objects in the results array.`,
             },
             ...buildImageParts(),
           ],
