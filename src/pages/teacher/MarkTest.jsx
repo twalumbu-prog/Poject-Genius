@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { ArrowLeft, Camera, Upload, CheckCircle, AlertCircle, Sparkles, ChevronDown, ChevronUp, X, FileCheck } from 'lucide-react';
 import { createWorker } from 'tesseract.js';
-import { applyDocScanFilter } from '../../utils/imageProcessing';
+import { explodeFilesToImages, applyDocScanFilter } from '../../utils/imageProcessing';
 import './Page.css';
 
 export default function MarkTest() {
@@ -52,38 +52,37 @@ export default function MarkTest() {
     ];
     const currentSteps = scanMode === 'camera' ? SCAN_STEPS_CAMERA : SCAN_STEPS_UPLOAD;
 
-    // ── Progress scheduling ────────────────────────────────────────────
-    // Drives the fill bar through checkpoints, deliberately stalling ~92%.
-    // Only completeScan() advances it to 100% when the API actually returns.
+    // ── Progress helpers ───────────────────────────────────────────────
+    // startScanProgress sets the bar into motion with a safe initial crawl.
+    // advanceScanProgress(done, total) updates the bar as each real script finishes.
+    // completeScan() drives it to 100% and shows the success card.
     const clearScanTimers = () => {
         scanTimers.current.forEach(id => clearTimeout(id));
         scanTimers.current = [];
     };
 
-    const startScanProgress = () => {
+    const startScanProgress = (total = 1) => {
         clearScanTimers();
         setScanProgress(0);
         setScanPhase(0);
-        // Checkpoints: [delay_ms, progress_pct, phase_index]
-        // S-curve feel: fast start, steady middle, heavy stall near end
-        const schedule = [
-            [400, 12, 0],
-            [1200, 28, 1],
-            [2800, 47, 2],
-            [5000, 63, 2],
-            [7500, 75, 3],
-            [10500, 84, 3],
-            [14000, 89, 4],
-            [18000, 92, 4],
-            [23000, 93, 4], // stall — waits for API
-        ];
-        schedule.forEach(([delay, pct, phase]) => {
-            const id = setTimeout(() => {
-                setScanProgress(pct);
-                setScanPhase(phase);
-            }, delay);
-            scanTimers.current.push(id);
-        });
+        // Initial crawl to 10% quickly — lets the user know we're working
+        const id = setTimeout(() => { setScanProgress(10); setScanPhase(1); }, 300);
+        scanTimers.current.push(id);
+        // Store total so advanceScanProgress can compute real %
+        scanTimers.current._total = total;
+        scanTimers.current._done = 0;
+    };
+
+    // Call once per script that finishes — advances bar proportionally up to 92%
+    const advanceScanProgress = () => {
+        scanTimers.current._done = (scanTimers.current._done ?? 0) + 1;
+        const done = scanTimers.current._done;
+        const total = scanTimers.current._total ?? 1;
+        // Map 0..total → 10%..92% (we stall at 92% until completeScan)
+        const pct = Math.round(10 + (done / total) * 82);
+        const phaseIdx = Math.min(4, Math.floor((done / total) * 5));
+        setScanProgress(Math.min(pct, 92));
+        setScanPhase(phaseIdx);
     };
 
     // Called when the API returns successfully
@@ -164,6 +163,89 @@ export default function MarkTest() {
         }
     }
 
+    // ── Core: sequential per-image AI processing ────────────────────────
+    // One API call per script — isolates failures and improves accuracy.
+    const processScriptImages = async (imageObjects) => {
+        const total = imageObjects.length;
+        const parsedBatch = [];
+
+        for (let i = 0; i < total; i++) {
+            const { base64, label } = imageObjects[i];
+            setProcessingStatus(`Marking script ${i + 1} of ${total}${total > 1 ? `: ${label}` : ''}...`);
+
+            try {
+                const response = await fetch(
+                    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-test-ai`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+                            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+                        },
+                        body: JSON.stringify({
+                            mode: 'mark_script',
+                            image: base64,
+                            imageIndex: i,
+                            markingScheme: markingScheme.questions,
+                            geminiKey: import.meta.env.VITE_GEMINI_API_KEY
+                        })
+                    }
+                );
+
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({}));
+                    throw new Error(errData.message || errData.error || `HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+                const resultsArray = data.results ? data.results : [data];
+                resultsArray.forEach(studentData => {
+                    parsedBatch.push({
+                        studentName: studentData.studentName || '',
+                        studentId: studentData.student_id || '',
+                        grade: studentData.grade || '',
+                        imageIndex: i,
+                        studentAnswers: markingScheme.questions.map(q => {
+                            const aiAns = studentData.answers?.find(a => a.question_number === q.question_number);
+                            return {
+                                question_number: q.question_number,
+                                student_answer: aiAns?.student_answer || '',
+                                is_correct: aiAns ? aiAns.is_correct : false,
+                                feedback: aiAns?.feedback || (aiAns ? '' : 'Not found in extraction'),
+                                confidence: aiAns?.confidence || 'Low',
+                                topic: q.topic
+                            };
+                        })
+                    });
+                });
+            } catch (scriptError) {
+                console.warn(`Script ${i + 1} (${label}) failed:`, scriptError.message);
+                // Push a placeholder so the reviewer can manually correct it
+                parsedBatch.push({
+                    studentName: `Unknown (${label})`,
+                    studentId: '',
+                    grade: '',
+                    imageIndex: i,
+                    _failed: true,
+                    studentAnswers: markingScheme.questions.map(q => ({
+                        question_number: q.question_number,
+                        student_answer: '',
+                        is_correct: false,
+                        feedback: `Script failed: ${scriptError.message}`,
+                        confidence: 'Low',
+                        topic: q.topic
+                    }))
+                });
+            }
+
+            advanceScanProgress();
+        }
+
+        return parsedBatch;
+    };
+
+    // ── Upload handler ───────────────────────────────────────────────────
     const handleFileUpload = async (event) => {
         const files = Array.from(event.target.files);
         if (files.length === 0 || !markingScheme) return;
@@ -173,108 +255,50 @@ export default function MarkTest() {
             setProcessingError(null);
             setScanComplete(null);
             setScanMode('upload');
-            setScanScriptCount(files.length);
-            setProcessingStatus('Processing uploaded files...');
-            startScanProgress();
+            setProcessingStatus('Reading files...');
 
-            const processedFiles = await Promise.all(files.map(async file => {
-                // Convert to base64
-                const reader = new FileReader();
-                const base64Promise = new Promise((resolve) => {
-                    reader.onload = () => resolve(reader.result);
-                    reader.readAsDataURL(file);
-                });
-                const rawBase64 = await base64Promise;
+            // Explode: images stay as single entries, PDFs split into per-page images
+            const imageObjects = await explodeFilesToImages(files, setProcessingStatus);
 
-                if (file.type.startsWith('image/')) {
-                    try {
-                        return await applyDocScanFilter(rawBase64);
-                    } catch (e) {
-                        console.warn("Filter failed, using raw image", e);
-                        return rawBase64;
-                    }
-                }
-                return rawBase64; // Return raw PDF or other supported types
-            }));
-
-            setProcessingStatus('Analyzing scripts with AI...');
-
-            // 1. Call AI Marking Edge Function
-            const response = await fetch(
-                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-test-ai`,
-                {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-                        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-                    },
-                    body: JSON.stringify({
-                        mode: 'mark_script',
-                        images: processedFiles,
-                        markingScheme: markingScheme.questions,
-                        geminiKey: import.meta.env.VITE_GEMINI_API_KEY
-                    })
-                }
-            );
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.message || errorData.error || `Error ${response.status}`);
+            if (imageObjects.length === 0) {
+                throw new Error('No readable images found. Please upload JPEG, PNG, or PDF files.');
             }
 
-            const data = await response.json();
+            setScanScriptCount(imageObjects.length);
+            startScanProgress(imageObjects.length);
 
-            const resultsArray = data.results || [data];
-            const parsedBatch = resultsArray.map(studentData => ({
-                studentName: studentData.studentName || '',
-                studentId: studentData.student_id || '',
-                grade: studentData.grade || '',
-                imageIndex: studentData.image_index ?? 0,
-                studentAnswers: markingScheme.questions.map(q => {
-                    const aiAns = studentData.answers?.find(a => a.question_number === q.question_number);
-                    return {
-                        question_number: q.question_number,
-                        student_answer: aiAns?.student_answer || '',
-                        is_correct: aiAns ? aiAns.is_correct : false,
-                        feedback: aiAns?.feedback || (aiAns ? '' : 'Missing from extraction'),
-                        confidence: aiAns?.confidence || 'Low',
-                        topic: q.topic
-                    };
-                })
-            }));
+            // Store images now so lightbox works immediately
+            const allBase64 = imageObjects.map(io => io.base64);
+            setBatchImages(allBase64);
+            setScannedImage(allBase64[0]);
 
-            // Store images then drive bar to 100% via completeScan
-            setBatchImages(processedFiles);
-            setScannedImage(processedFiles[0]);
+            const parsedBatch = await processScriptImages(imageObjects);
+
             setCurrentReviewIndex(0);
             setBatchResults([]);
             setResults(null);
-            completeScan(parsedBatch); // drives bar to 100%, then shows success card
+            completeScan(parsedBatch);
         } catch (error) {
             console.error('AI Processing Error:', error);
             clearScanTimers();
-            const rawMessage = error?.message || (typeof error === 'string' ? error : "Unknown error occurred.");
+            const rawMessage = error?.message || 'Unknown error occurred.';
 
-            // Format lay-friendly explanation based on common error patterns
-            let friendlyMessage = "The AI was unable to read the document successfully. This may happen if the image is too blurry, the text is unreadable, or the AI service is temporarily overloaded.";
+            let friendlyMessage = 'The AI was unable to read the document. Please ensure images are clear and well-lit.';
             if (rawMessage.includes('quota') || rawMessage.includes('429')) {
-                friendlyMessage = "The AI service is currently busy. Please wait a moment and try again.";
-            } else if (rawMessage.includes('token') || rawMessage.includes('Unterminated')) {
-                friendlyMessage = "The batch size is too large for the AI to process at once. Please try uploading the scripts in smaller batches (e.g., 2-3 at a time).";
-            } else if (rawMessage.includes('Failed to fetch') || rawMessage.includes('500') || rawMessage.includes('failed')) {
-                friendlyMessage = "We could not connect to the AI grading servers cleanly. Please check your internet connection or try again later.";
+                friendlyMessage = 'The AI service is currently busy. Please wait a moment and try again.';
+            } else if (rawMessage.includes('No readable images')) {
+                friendlyMessage = rawMessage;
+            } else if (rawMessage.includes('Failed to fetch')) {
+                friendlyMessage = 'Could not connect to the AI servers. Please check your internet connection.';
             }
 
-            setProcessingError({
-                title: "Marking Failed",
-                message: friendlyMessage,
-                technicalDetails: rawMessage
-            });
+            setProcessingError({ title: 'Marking Failed', message: friendlyMessage, technicalDetails: rawMessage });
             setIsProcessing(false);
             setProcessingStatus('');
         }
     };
+
+
 
 
     const handleSaveResult = async (forceOverwrite = false) => {
@@ -690,62 +714,26 @@ export default function MarkTest() {
 
                                             try {
                                                 setScanMode('camera');
-                                                setScanScriptCount(capturedImages.length);
                                                 setScanComplete(null);
                                                 setIsProcessing(true);
-                                                startScanProgress();
+                                                setProcessingStatus(`Enhancing ${capturedImages.length} image${capturedImages.length !== 1 ? 's' : ''}...`);
 
-                                                // 1. Apply document scan filter to all captured images sequentially
-                                                setProcessingStatus(`Enhancing ${capturedImages.length} images...`);
-                                                const filteredImages = await Promise.all(
-                                                    capturedImages.map(img => applyDocScanFilter(img))
-                                                );
-
-                                                // 2. Trigger AI marking directly with batch
-                                                setProcessingStatus(`Analyzing ${capturedImages.length} scripts with AI...`);
-                                                const response = await fetch(
-                                                    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-test-ai`,
-                                                    {
-                                                        method: 'POST',
-                                                        headers: {
-                                                            'Content-Type': 'application/json',
-                                                            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-                                                            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-                                                        },
-                                                        body: JSON.stringify({
-                                                            mode: 'mark_script',
-                                                            images: filteredImages,
-                                                            markingScheme: markingScheme.questions,
-                                                            geminiKey: import.meta.env.VITE_GEMINI_API_KEY
-                                                        })
-                                                    }
-                                                );
-
-                                                if (!response.ok) throw new Error("AI failed");
-                                                const data = await response.json();
-
-                                                const resultsArray = data.results || [data];
-                                                const parsedBatch = resultsArray.map(studentData => ({
-                                                    studentName: studentData.studentName || '',
-                                                    studentId: studentData.student_id || '',
-                                                    grade: studentData.grade || '',
-                                                    imageIndex: studentData.image_index ?? 0,
-                                                    studentAnswers: markingScheme.questions.map(q => {
-                                                        const aiAns = studentData.answers?.find(a => a.question_number === q.question_number);
-                                                        return {
-                                                            question_number: q.question_number,
-                                                            student_answer: aiAns?.student_answer || '',
-                                                            is_correct: aiAns ? aiAns.is_correct : false,
-                                                            feedback: aiAns?.feedback || (aiAns ? '' : 'Missing from extraction'),
-                                                            confidence: aiAns?.confidence || 'Low',
-                                                            topic: q.topic
-                                                        };
+                                                // Enhance each camera image and wrap in {base64, label}
+                                                const imageObjects = await Promise.all(
+                                                    capturedImages.map(async (img, idx) => {
+                                                        const enhanced = await applyDocScanFilter(img).catch(() => img);
+                                                        return { base64: enhanced, label: `Photo ${idx + 1}` };
                                                     })
-                                                }));
+                                                );
 
-                                                // Store filtered images then drive bar to 100%
-                                                setBatchImages(filteredImages);
-                                                setScannedImage(filteredImages[0]);
+                                                const allBase64 = imageObjects.map(io => io.base64);
+                                                setScanScriptCount(imageObjects.length);
+                                                startScanProgress(imageObjects.length);
+                                                setBatchImages(allBase64);
+                                                setScannedImage(allBase64[0]);
+
+                                                const parsedBatch = await processScriptImages(imageObjects);
+
                                                 setCurrentReviewIndex(0);
                                                 setBatchResults([]);
                                                 setResults(null);
@@ -754,8 +742,8 @@ export default function MarkTest() {
                                             } catch (error) {
                                                 console.error('Scan Error:', error);
                                                 clearScanTimers();
-                                                const rawMessage = error?.message || (typeof error === 'string' ? error : "Unknown error occurred.");
-                                                setProcessingError({ title: "Scan Failed", message: "The camera scan could not be processed. Please ensure the images are clear and try again.", technicalDetails: rawMessage });
+                                                const rawMessage = error?.message || 'Unknown error occurred.';
+                                                setProcessingError({ title: 'Scan Failed', message: 'The camera scan could not be processed. Please ensure the images are clear and try again.', technicalDetails: rawMessage });
                                                 setIsProcessing(false);
                                                 setProcessingStatus('');
                                             }

@@ -1,61 +1,167 @@
+/**
+ * imageProcessing.js
+ * Utilities for document scan enhancement and PDF-to-image conversion.
+ */
+
+// ── PDF.js setup ─────────────────────────────────────────────────────────────
+// We load the worker from the same pdfjs-dist package so Vite bundles it.
+import * as pdfjsLib from 'pdfjs-dist';
+import PdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+pdfjsLib.GlobalWorkerOptions.workerSrc = PdfjsWorker;
+
+const PDF_RENDER_SCALE = 1.8; // ~1620px wide for an A4 page — good for OCR
+const MAX_IMAGE_DIM = 1600; // cap for camera/upload images to stay under 546 OOM limit
+
+// ── applyDocScanFilter ────────────────────────────────────────────────────────
+/**
+ * Applies a CamScanner-style high-contrast grayscale filter to a single image.
+ * Downscales to MAX_IMAGE_DIM on the longest side before processing.
+ * @param {string} base64Image  data:image/... base64 string
+ * @returns {Promise<string>}   filtered JPEG base64 string
+ */
 export async function applyDocScanFilter(base64Image) {
-    // Skip image filter for PDFs or any non-image data
-    if (!base64Image.startsWith('data:image/')) {
-        return base64Image;
-    }
+    if (!base64Image.startsWith('data:image/')) return base64Image;
 
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-
-            // Cap resolution at 1600px on the longest side.
-            // Phone camera images can be 3000-4000px wide; sending them raw
-            // at full size causes 546 "compute resource exceeded" errors in
-            // the Supabase edge function. 1600px is more than enough for OCR.
-            const MAX_DIM = 1600;
             let { width, height } = img;
-            if (width > MAX_DIM || height > MAX_DIM) {
-                const scale = MAX_DIM / Math.max(width, height);
+            if (width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM) {
+                const scale = MAX_IMAGE_DIM / Math.max(width, height);
                 width = Math.round(width * scale);
                 height = Math.round(height * scale);
             }
 
+            const canvas = document.createElement('canvas');
             canvas.width = width;
             canvas.height = height;
-
-            // Draw scaled image
+            const ctx = canvas.getContext('2d');
             ctx.drawImage(img, 0, 0, width, height);
 
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const data = imageData.data;
+            const imageData = ctx.getImageData(0, 0, width, height);
+            const d = imageData.data;
 
-            // Simple Grayscale + High Contrast Thresholding
-            for (let i = 0; i < data.length; i += 4) {
-                const r = data[i];
-                const g = data[i + 1];
-                const b = data[i + 2];
-
-                let gray = 0.299 * r + 0.587 * g + 0.114 * b;
-
-                if (gray > 160) {
-                    gray = 255;
-                } else if (gray < 80) {
-                    gray = 0;
-                } else {
-                    gray = ((gray - 80) / (160 - 80)) * 255;
-                    gray = gray > 128 ? 255 : 0;
-                }
-
-                data[i] = data[i + 1] = data[i + 2] = gray;
+            for (let i = 0; i < d.length; i += 4) {
+                let gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+                if (gray > 160) gray = 255;
+                else if (gray < 80) gray = 0;
+                else gray = ((gray - 80) / 80) * 255 > 128 ? 255 : 0;
+                d[i] = d[i + 1] = d[i + 2] = gray;
             }
 
             ctx.putImageData(imageData, 0, 0);
-            // 0.82 quality — good clarity for handwriting, keeps size small
             resolve(canvas.toDataURL('image/jpeg', 0.82));
         };
         img.onerror = reject;
         img.src = base64Image;
     });
+}
+
+// ── pdfToImages ───────────────────────────────────────────────────────────────
+/**
+ * Converts every page of a PDF (given as a base64 data-URL or ArrayBuffer)
+ * into a JPEG base64 string. Returns one entry per page.
+ * @param {string} base64Pdf  data:application/pdf;base64,... string
+ * @returns {Promise<string[]>}  array of JPEG base64 strings, one per page
+ */
+export async function pdfToImages(base64Pdf) {
+    // Strip the data-URL header to get raw base64, then decode to binary
+    const base64Data = base64Pdf.split(',')[1];
+    const binaryStr = atob(base64Data);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+
+    const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+    const pageImages = [];
+
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum);
+        const viewport = page.getViewport({ scale: PDF_RENDER_SCALE });
+
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(viewport.width);
+        canvas.height = Math.round(viewport.height);
+        const ctx = canvas.getContext('2d');
+
+        await page.render({ canvasContext: ctx, viewport }).promise;
+
+        // Apply the same contrast filter so handwriting pops
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const d = imageData.data;
+        for (let i = 0; i < d.length; i += 4) {
+            let gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+            if (gray > 170) gray = 255;
+            else if (gray < 90) gray = 0;
+            else gray = ((gray - 90) / 80) * 255 > 128 ? 255 : 0;
+            d[i] = d[i + 1] = d[i + 2] = gray;
+        }
+        ctx.putImageData(imageData, 0, 0);
+
+        pageImages.push(canvas.toDataURL('image/jpeg', 0.85));
+    }
+
+    return pageImages;
+}
+
+// ── explodeFilesToImages ──────────────────────────────────────────────────────
+/**
+ * Takes a FileList / File[] from an upload input and returns a flat array of
+ * processed JPEG images — one entry per expected student script.
+ *
+ * Rules:
+ *   - image/*  → one entry per file (after doc-scan enhancement)
+ *   - PDF      → one entry per PAGE (each page = one student script)
+ *
+ * @param {File[]} files
+ * @param {(msg: string) => void} [onStatus]  optional progress callback
+ * @returns {Promise<Array<{base64: string, label: string}>>}
+ */
+export async function explodeFilesToImages(files, onStatus) {
+    const results = [];
+
+    for (const file of files) {
+        if (file.type === 'application/pdf') {
+            onStatus?.(`Converting PDF: ${file.name}...`);
+
+            // Read file as base64
+            const base64Pdf = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+
+            const pages = await pdfToImages(base64Pdf);
+            pages.forEach((pageBase64, i) => {
+                results.push({
+                    base64: pageBase64,
+                    label: pages.length === 1
+                        ? file.name
+                        : `${file.name} — page ${i + 1}`,
+                });
+            });
+
+        } else if (file.type.startsWith('image/')) {
+            onStatus?.(`Enhancing image: ${file.name}...`);
+
+            const rawBase64 = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+
+            try {
+                const enhanced = await applyDocScanFilter(rawBase64);
+                results.push({ base64: enhanced, label: file.name });
+            } catch {
+                results.push({ base64: rawBase64, label: file.name });
+            }
+
+        } else {
+            console.warn(`Unsupported file type: ${file.type} (${file.name}), skipping.`);
+        }
+    }
+
+    return results;
 }
