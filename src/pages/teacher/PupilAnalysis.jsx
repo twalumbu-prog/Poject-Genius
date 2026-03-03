@@ -165,9 +165,17 @@ export default function PupilAnalysis() {
 
             {showScannedCopy && (
                 <div className="lightbox-overlay" onClick={() => setShowScannedCopy(false)}>
-                    <div className="lightbox-content" onClick={e => e.stopPropagation()}>
+                    <div className="lightbox-content" onClick={e => e.stopPropagation()} style={{ width: '90%', height: '90%', display: 'flex', flexDirection: 'column' }}>
                         <button className="lightbox-close" onClick={() => setShowScannedCopy(false)}>×</button>
-                        <img src={result.scanned_copy_url} alt="Scanned Exam Script" />
+                        {result.scanned_copy_url?.toLowerCase().endsWith('.pdf') ? (
+                            <iframe
+                                src={result.scanned_copy_url}
+                                title="Scanned PDF"
+                                style={{ width: '100%', height: '100%', border: 'none', borderRadius: '8px' }}
+                            />
+                        ) : (
+                            <img src={result.scanned_copy_url} alt="Scanned Exam Script" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+                        )}
                     </div>
                 </div>
             )}

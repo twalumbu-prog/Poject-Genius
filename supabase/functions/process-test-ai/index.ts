@@ -394,30 +394,38 @@ Response Schema:
       messages = [
         {
           role: "system",
-          content: `You are an expert examiner grading student handwritten test scripts against a provided marking scheme. The document might contain multiple different scripts from different students.
+          content: `You are an expert examiner grading student handwritten test scripts against a provided marking scheme. 
+          A single document or image may contain scripts from MULTIPLE different students. 
+          Alternatively, multiple images might correspond to different students or the same student's continuation.
 Always respond with strictly valid JSON.
 
 CRITICAL INSTRUCTIONS:
-1. Identify all distinct student scripts in the document. You have been provided with ${numImages} image(s). If there are multiple images, assume EACH image is a separate student's test script.
-2. For each student script, extract the student's name from the top of the paper. If unreadable, return "Unknown".
-3. Evaluate the student's handwritten answer for each question against the correct answer in the marking scheme.
-4. If handwriting is crossed out, ignore the crossed-out part and evaluate the latest answer.
-5. If an answer is completely illegible, mark it incorrect, set confidence to "Low", and write "Illegible handwriting" in feedback.
-6. If the student left the question blank, mark it incorrect and write "Unanswered" in the student_answer field.
+1. Identify ALL distinct student scripts present across all provided images. You have been provided with ${numImages} image(s).
+2. For each student script found, create a separate object in the "results" array.
+3. For each student script, extract:
+    - "studentName": The handwritten name at the top.
+    - "student_id": The handwritten ID or index number.
+    - "grade": The handwritten grade level (e.g. Grade 8).
+    - "image_index": The 0-based index of the image where this specific student's script was found (one of: ${Array.from({ length: numImages }, (_, i) => i).join(', ')}).
+4. Evaluate the handwritten answers against the marking scheme.
+5. If handwriting is crossed out, ignore the crossed-out part and evaluate the latest answer.
+6. If an answer is illegible, mark it incorrect, set confidence to "Low", and write "Illegible handwriting" in feedback.
+7. If the student left the question blank, mark it incorrect and write "Unanswered" in the student_answer field.
 
 Response Schema:
 {
   "results": [
     {
       "studentName": "string",
-      "student_id": "string (the student ID or index number handwritten on the sheet)",
-      "grade": "string (the grade level handwritten on the sheet, e.g. Grade 8)",
+      "student_id": "string",
+      "grade": "string",
+      "image_index": number,
       "answers": [
         {
           "question_number": number,
-          "student_answer": "string (what the student wrote, e.g. 'A', 'B', 'Blank', 'Illegible')",
+          "student_answer": "string",
           "is_correct": boolean,
-          "feedback": "string (Explain why it is wrong, or note if illegible/blank. Leave empty if correct.)",
+          "feedback": "string",
           "confidence": "High|Medium|Low"
         }
       ]
@@ -430,7 +438,7 @@ Response Schema:
           content: [
             {
               type: "text",
-              text: `Evaluate these ${numImages} student handwritten test script(s) against the following marking scheme:\n\n${JSON.stringify(markingScheme, null, 2)}\n\nIMPORTANT: You must output a distinct result object in the "results" array for EACH unique student script you identify. Since there are ${numImages} images, expect to output at least ${numImages} objects in the results array.`,
+              text: `Evaluate these ${numImages} image(s) against the following marking scheme:\n\n${JSON.stringify(markingScheme, null, 2)}\n\nIMPORTANT: I expect to find results for every student script visible in these images. If there are 3 students shown across the images, I expect 3 objects in the "results" array.`,
             },
             ...buildImageParts(),
           ],

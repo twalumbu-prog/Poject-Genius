@@ -28,6 +28,7 @@ export default function MarkTest() {
     const [showLightbox, setShowLightbox] = useState(false);
     const [duplicatePrompt, setDuplicatePrompt] = useState(null);
     const [capturedImages, setCapturedImages] = useState([]);
+    const [batchImages, setBatchImages] = useState([]); // All base64 images in current upload/capture
 
     const base64ToBlob = (base64) => {
         const byteString = atob(base64.split(',')[1]);
@@ -88,25 +89,35 @@ export default function MarkTest() {
     }
 
     const handleFileUpload = async (event) => {
-        const file = event.target.files[0];
-        if (!file || !markingScheme) return;
+        const files = Array.from(event.target.files);
+        if (files.length === 0 || !markingScheme) return;
 
         try {
             setIsProcessing(true);
             setProcessingError(null);
-            setProcessingStatus('Analyzing script with AI...');
+            setProcessingStatus('Processing uploaded files...');
 
-            // Convert to base64
-            const reader = new FileReader();
-            const base64Promise = new Promise((resolve) => {
-                reader.onload = () => resolve(reader.result);
-                reader.readAsDataURL(file);
-            });
-            const rawBase64 = await base64Promise;
+            const processedFiles = await Promise.all(files.map(async file => {
+                // Convert to base64
+                const reader = new FileReader();
+                const base64Promise = new Promise((resolve) => {
+                    reader.onload = () => resolve(reader.result);
+                    reader.readAsDataURL(file);
+                });
+                const rawBase64 = await base64Promise;
 
-            setProcessingStatus('Enhancing image for better AI accuracy...');
-            const filteredBase64 = await applyDocScanFilter(rawBase64);
-            const base64Image = filteredBase64;
+                if (file.type.startsWith('image/')) {
+                    try {
+                        return await applyDocScanFilter(rawBase64);
+                    } catch (e) {
+                        console.warn("Filter failed, using raw image", e);
+                        return rawBase64;
+                    }
+                }
+                return rawBase64; // Return raw PDF or other supported types
+            }));
+
+            setProcessingStatus('Analyzing scripts with AI...');
 
             // 1. Call AI Marking Edge Function
             const response = await fetch(
@@ -120,7 +131,7 @@ export default function MarkTest() {
                     },
                     body: JSON.stringify({
                         mode: 'mark_script',
-                        images: [filteredBase64],
+                        images: processedFiles,
                         markingScheme: markingScheme.questions,
                         geminiKey: import.meta.env.VITE_GEMINI_API_KEY
                     })
@@ -139,6 +150,7 @@ export default function MarkTest() {
                 studentName: studentData.studentName || '',
                 studentId: studentData.student_id || '',
                 grade: studentData.grade || '',
+                imageIndex: studentData.image_index ?? 0,
                 studentAnswers: markingScheme.questions.map(q => {
                     const aiAns = studentData.answers?.find(a => a.question_number === q.question_number);
                     return {
@@ -152,8 +164,9 @@ export default function MarkTest() {
                 })
             }));
 
-            // Just store the first image as the representative scan for the review UI for now
-            setScannedImage(filteredBase64);
+            // Store all processed images/docs for this batch
+            setBatchImages(processedFiles);
+            setScannedImage(processedFiles[0]);
             setReviewBatch(parsedBatch);
             setCurrentReviewIndex(0);
             setBatchResults([]);
@@ -279,20 +292,20 @@ export default function MarkTest() {
             };
 
             // 4a. Upload Scanned Copy if exists
-            if (scannedImage) {
+            const studentImage = batchImages[reviewData.imageIndex] || scannedImage;
+            if (studentImage) {
                 try {
                     setProcessingStatus('Uploading scanned script...');
-                    // Use the specific image for this student if available, fallback to the first batch image
-                    // Note: In current implementation, we are using a simplified approach where scannedImage
-                    // represents the script being reviewed.
-                    const blob = base64ToBlob(scannedImage);
-                    const fileExt = 'jpg';
+                    const mimeString = studentImage.split(',')[1] ? studentImage.split(',')[0].split(':')[1].split(';')[0] : 'image/jpeg';
+                    const blob = base64ToBlob(studentImage);
+                    const isPdf = mimeString === 'application/pdf';
+                    const fileExt = isPdf ? 'pdf' : 'jpg';
                     const fileName = `scanned-exams/${testId}/${pupilId}_${Date.now()}.${fileExt}`;
 
                     const { error: uploadError } = await supabase.storage
                         .from('student-scripts')
                         .upload(fileName, blob, {
-                            contentType: 'image/jpeg',
+                            contentType: mimeString,
                             upsert: true
                         });
 
@@ -301,7 +314,8 @@ export default function MarkTest() {
                             .from('student-scripts')
                             .getPublicUrl(fileName);
                         resultPayload.scanned_copy_url = publicUrl;
-                    } else {
+                    }
+                    else {
                         console.error('Error uploading scanned image:', uploadError);
                     }
                 } catch (uploadErr) {
@@ -414,6 +428,7 @@ export default function MarkTest() {
     const triggerFileUpload = () => {
         const input = document.createElement('input');
         input.type = 'file';
+        input.multiple = true;
         input.accept = 'image/*,application/pdf';
         input.onchange = handleFileUpload;
         input.click();
@@ -579,6 +594,7 @@ export default function MarkTest() {
                                                     studentName: studentData.studentName || '',
                                                     studentId: studentData.student_id || '',
                                                     grade: studentData.grade || '',
+                                                    imageIndex: studentData.image_index ?? 0,
                                                     studentAnswers: markingScheme.questions.map(q => {
                                                         const aiAns = studentData.answers?.find(a => a.question_number === q.question_number);
                                                         return {
@@ -592,7 +608,8 @@ export default function MarkTest() {
                                                     })
                                                 }));
 
-                                                // Use the first image for the review UI representing the batch
+                                                // Store filtered images for batch mapping
+                                                setBatchImages(filteredImages);
                                                 setScannedImage(filteredImages[0]);
                                                 setReviewBatch(parsedBatch);
                                                 setCurrentReviewIndex(0);
