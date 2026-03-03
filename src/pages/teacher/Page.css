@@ -1414,12 +1414,14 @@ video {
 /* ── SCAN COMPLETE CARD ─────────────────────────────────────────── */
 .scan-complete-card {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 28px;
+    text-align: center;
+    gap: 0;
     background: white;
     border: 2px solid #A7F3D0;
     border-radius: 20px;
-    padding: 28px 32px;
+    padding: 36px 32px 32px;
     margin-bottom: 24px;
     box-shadow: 0 8px 32px rgba(5, 150, 105, 0.1);
     animation: scanFadeUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -1427,13 +1429,14 @@ video {
 
 .scan-check-wrap {
     flex-shrink: 0;
-    width: 64px;
-    height: 64px;
+    width: 80px;
+    height: 80px;
+    margin-bottom: 16px;
 }
 
 .scan-check-svg {
-    width: 64px;
-    height: 64px;
+    width: 80px;
+    height: 80px;
 }
 
 .scan-check-circle {
@@ -1457,10 +1460,10 @@ video {
 }
 
 .scan-complete-body h3 {
-    font-size: 20px;
+    font-size: 22px;
     font-weight: 900;
     color: var(--color-text-primary);
-    margin: 0 0 4px;
+    margin: 0 0 6px;
     letter-spacing: -0.02em;
 }
 
@@ -1468,11 +1471,11 @@ video {
     font-size: 14px;
     font-weight: 700;
     color: var(--color-text-secondary);
-    margin: 0 0 8px;
+    margin: 0 0 16px;
 }
 
 .scan-complete-warn {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 6px;
     font-size: 12.5px;
@@ -1481,16 +1484,19 @@ video {
     background: #FFFBEB;
     border: 1px solid #FDE68A;
     border-radius: 8px;
-    padding: 6px 10px;
-    margin: 0 0 14px;
-    width: fit-content;
+    padding: 6px 12px;
+    margin: 0 0 16px;
 }
 
 .scan-review-btn {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 8px;
+    width: 100%;
     margin-top: 4px;
+    font-size: 15px;
+    letter-spacing: 0.04em;
 }
 
 /* ── SCAN ERROR CARD ────────────────────────────────────────────── */
