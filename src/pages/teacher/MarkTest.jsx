@@ -1063,7 +1063,12 @@ export default function MarkTest() {
                 <div className="lightbox-overlay" onClick={() => setShowLightbox(false)}>
                     <div className="lightbox-content" onClick={e => e.stopPropagation()}>
                         <button className="lightbox-close" onClick={() => setShowLightbox(false)}>×</button>
-                        <img src={scannedImage} alt="Full Screen Scan" />
+                        {batchImages[currentReviewIndex]
+                            ? <img src={batchImages[currentReviewIndex]} alt="Full Screen Scan" />
+                            : scannedImage
+                                ? <img src={scannedImage} alt="Full Screen Scan" />
+                                : <p style={{ color: 'white', padding: '32px' }}>No image available for this script.</p>
+                        }
                     </div>
                 </div>
             )}
