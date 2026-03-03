@@ -272,6 +272,65 @@ export default function StudentProfile() {
                 </div>
             )}
 
+            {activeSubject && termEntries.length > 0 && (
+                <div className="subject-overview-card">
+                    <div className="overview-header">
+                        <div className="overview-stat">
+                            <span className="overview-label">Subject Mastery</span>
+                            <span className="overview-value">
+                                {(() => {
+                                    let total = 0;
+                                    let count = 0;
+                                    Object.values(currentSubjectData).forEach(topics => {
+                                        topics.forEach(t => {
+                                            if (t.attempts?.length > 0) {
+                                                total += t.attempts.reduce((s, a) => s + a.percentage, 0) / t.attempts.length;
+                                                count++;
+                                            }
+                                        });
+                                    });
+                                    return count > 0 ? `${Math.round(total / count)}%` : '0%';
+                                })()}
+                            </span>
+                        </div>
+                        <div className="overview-stat">
+                            <span className="overview-label">Progress</span>
+                            <span className="overview-value">
+                                {(() => {
+                                    let attempted = 0;
+                                    let total = 0;
+                                    Object.values(currentSubjectData).forEach(topics => {
+                                        topics.forEach(t => {
+                                            total++;
+                                            if (t.attempts?.length > 0) attempted++;
+                                        });
+                                    });
+                                    return `${attempted}/${total} Topics`;
+                                })()}
+                            </span>
+                        </div>
+                    </div>
+                    {/* Overall Subject Graph */}
+                    {(() => {
+                        const allAttempts = [];
+                        Object.values(currentSubjectData).forEach(topics => {
+                            topics.forEach(t => {
+                                if (t.attempts) allAttempts.push(...t.attempts);
+                            });
+                        });
+                        return allAttempts.length > 0 ? (
+                            <div className="overview-chart">
+                                <PerformanceGraph attempts={allAttempts.sort((a, b) => new Date(a.date) - new Date(b.date))} />
+                            </div>
+                        ) : (
+                            <div className="overview-empty">
+                                <p>Perform assessments to see progress trends here.</p>
+                            </div>
+                        );
+                    })()}
+                </div>
+            )}
+
             <div className="syllabus-hierarchy">
                 {termEntries.map(([termName, topics]) => (
                     <div key={termName} className="term-section">
