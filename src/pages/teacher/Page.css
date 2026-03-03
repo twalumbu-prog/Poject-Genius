@@ -340,6 +340,53 @@
     font-weight: var(--font-weight-medium);
 }
 
+.result-actions-inline {
+    display: flex;
+    gap: var(--spacing-sm);
+    opacity: 0;
+    transition: opacity var(--transition-base);
+}
+
+.result-card:hover .result-actions-inline {
+    opacity: 1;
+}
+
+.icon-action-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: var(--radius-lg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-bg-secondary);
+    border: 2px solid var(--color-border-light);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.icon-action-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.05);
+}
+
+.rescan-btn:hover {
+    color: var(--color-accent-primary);
+    border-color: var(--color-accent-primary);
+    background-color: var(--color-accent-light);
+}
+
+.delete-btn:hover {
+    color: var(--color-error);
+    border-color: var(--color-error);
+    background-color: #fff5f5;
+}
+
+.icon-action-btn:active {
+    transform: translateY(1px);
+    box-shadow: none;
+}
+
 .result-score {
     text-align: right;
 }

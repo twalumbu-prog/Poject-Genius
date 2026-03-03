@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
-import { ArrowLeft, FileCheck, Settings, Plus, Sparkles, FileText } from 'lucide-react';
+import { ArrowLeft, FileCheck, Settings, Plus, Sparkles, FileText, Trash2, RefreshCcw } from 'lucide-react';
 import { formatPercentage, formatRank } from '../../utils/formatters';
 import './Page.css';
 
@@ -42,6 +42,33 @@ export default function TestDetails() {
             setLoading(false);
         }
     }
+
+    const handleRescan = (e) => {
+        e.stopPropagation();
+        navigate(`/teacher/test/${testId}/mark`);
+    };
+
+    const handleDeleteResult = async (e, resultId, studentName) => {
+        e.stopPropagation();
+        if (!confirm(`Are you sure you want to delete the result for ${studentName}? This cannot be undone.`)) {
+            return;
+        }
+
+        try {
+            const { error } = await supabase
+                .from('results')
+                .delete()
+                .eq('id', resultId);
+
+            if (error) throw error;
+
+            // Update local state
+            setResults(prev => prev.filter(r => r.id !== resultId));
+        } catch (error) {
+            console.error('Error deleting result:', error);
+            alert('Failed to delete result. Please try again.');
+        }
+    };
 
     if (loading) {
         return <div className="loading-container">Loading...</div>;
@@ -125,6 +152,22 @@ export default function TestDetails() {
                                 <div className="result-info">
                                     <h3>{result.pupils.name}</h3>
                                     <p>{result.answers?.length || 0} questions answered</p>
+                                </div>
+                                <div className="result-actions-inline">
+                                    <button
+                                        className="icon-action-btn rescan-btn"
+                                        title="Rescan Script"
+                                        onClick={handleRescan}
+                                    >
+                                        <RefreshCcw size={18} />
+                                    </button>
+                                    <button
+                                        className="icon-action-btn delete-btn"
+                                        title="Delete Result"
+                                        onClick={(e) => handleDeleteResult(e, result.id, result.pupils.name)}
+                                    >
+                                        <Trash2 size={18} />
+                                    </button>
                                 </div>
                                 <div className="result-score">
                                     <div className="score-percentage">
