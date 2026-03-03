@@ -314,6 +314,7 @@ export default function MarkTest() {
                             .from('student-scripts')
                             .getPublicUrl(fileName);
                         resultPayload.scanned_copy_url = publicUrl;
+                        resultPayload.scanned_copy_mime = mimeString;
                     }
                     else {
                         console.error('Error uploading scanned image:', uploadError);

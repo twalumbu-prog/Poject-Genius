@@ -167,7 +167,7 @@ export default function PupilAnalysis() {
                 <div className="lightbox-overlay" onClick={() => setShowScannedCopy(false)}>
                     <div className="lightbox-content" onClick={e => e.stopPropagation()} style={{ width: '90%', height: '90%', display: 'flex', flexDirection: 'column' }}>
                         <button className="lightbox-close" onClick={() => setShowScannedCopy(false)}>×</button>
-                        {result.scanned_copy_url?.toLowerCase().endsWith('.pdf') ? (
+                        {(result.scanned_copy_mime === 'application/pdf' || result.scanned_copy_url?.toLowerCase().endsWith('.pdf')) ? (
                             <iframe
                                 src={result.scanned_copy_url}
                                 title="Scanned PDF"
