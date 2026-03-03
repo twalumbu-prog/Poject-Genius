@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
-import { ArrowLeft, TrendingUp, TrendingDown, CheckCircle, XCircle } from 'lucide-react';
+import { ArrowLeft, TrendingUp, TrendingDown, CheckCircle, XCircle, Camera } from 'lucide-react';
 import { formatPercentage } from '../../utils/formatters';
 import './Page.css';
 
@@ -12,6 +12,7 @@ export default function PupilAnalysis() {
     const [result, setResult] = useState(null);
     const [topicAnalysis, setTopicAnalysis] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [showScannedCopy, setShowScannedCopy] = useState(false);
 
     useEffect(() => {
         fetchAnalysisData();
@@ -114,7 +115,19 @@ export default function PupilAnalysis() {
 
             {result.answers && result.answers.length > 0 && (
                 <div className="analysis-section">
-                    <h2>Detailed Answer Breakdown</h2>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--spacing-lg)' }}>
+                        <h2 style={{ margin: 0 }}>Detailed Answer Breakdown</h2>
+                        {result.scanned_copy_url && (
+                            <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => setShowScannedCopy(true)}
+                                style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                            >
+                                <Camera size={16} />
+                                View Scanned Copy
+                            </button>
+                        )}
+                    </div>
                     <div className="table-container">
                         <table className="analysis-table">
                             <thead>
@@ -146,6 +159,15 @@ export default function PupilAnalysis() {
                                 ))}
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            )}
+
+            {showScannedCopy && (
+                <div className="lightbox-overlay" onClick={() => setShowScannedCopy(false)}>
+                    <div className="lightbox-content" onClick={e => e.stopPropagation()}>
+                        <button className="lightbox-close" onClick={() => setShowScannedCopy(false)}>×</button>
+                        <img src={result.scanned_copy_url} alt="Scanned Exam Script" />
                     </div>
                 </div>
             )}

@@ -29,6 +29,17 @@ export default function MarkTest() {
     const [duplicatePrompt, setDuplicatePrompt] = useState(null);
     const [capturedImages, setCapturedImages] = useState([]);
 
+    const base64ToBlob = (base64) => {
+        const byteString = atob(base64.split(',')[1]);
+        const mimeString = base64.split(',')[0].split(':')[1].split(';')[0];
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) {
+            ia[i] = byteString.charCodeAt(i);
+        }
+        return new Blob([ab], { type: mimeString });
+    };
+
     const reviewData = reviewBatch ? reviewBatch[currentReviewIndex] : null;
 
     useEffect(() => {
@@ -259,15 +270,48 @@ export default function MarkTest() {
             }
 
             // 4. Save Result (Insert or Overwrite confirmed)
+            const resultPayload = {
+                test_id: testId,
+                pupil_id: pupilId,
+                answers: studentAnswers,
+                score,
+                percentage
+            };
+
+            // 4a. Upload Scanned Copy if exists
+            if (scannedImage) {
+                try {
+                    setProcessingStatus('Uploading scanned script...');
+                    // Use the specific image for this student if available, fallback to the first batch image
+                    // Note: In current implementation, we are using a simplified approach where scannedImage
+                    // represents the script being reviewed.
+                    const blob = base64ToBlob(scannedImage);
+                    const fileExt = 'jpg';
+                    const fileName = `scanned-exams/${testId}/${pupilId}_${Date.now()}.${fileExt}`;
+
+                    const { error: uploadError } = await supabase.storage
+                        .from('student-scripts')
+                        .upload(fileName, blob, {
+                            contentType: 'image/jpeg',
+                            upsert: true
+                        });
+
+                    if (!uploadError) {
+                        const { data: { publicUrl } } = supabase.storage
+                            .from('student-scripts')
+                            .getPublicUrl(fileName);
+                        resultPayload.scanned_copy_url = publicUrl;
+                    } else {
+                        console.error('Error uploading scanned image:', uploadError);
+                    }
+                } catch (uploadErr) {
+                    console.error('Storage error:', uploadErr);
+                }
+            }
+
             const { data: result, error: resError } = await supabase
                 .from('results')
-                .upsert({
-                    test_id: testId,
-                    pupil_id: pupilId,
-                    answers: studentAnswers,
-                    score,
-                    percentage
-                }, { onConflict: 'test_id,pupil_id' })
+                .upsert(resultPayload, { onConflict: 'test_id,pupil_id' })
                 .select()
                 .single();
 
