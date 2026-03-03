@@ -20,33 +20,28 @@ function cleanRepairAndParseJson(text: string) {
     return JSON.parse(cleaned);
   } catch (e) {
     if (cleaned.length > 100) {
-      console.warn("JSON parse failed, attempting repair...");
-      const rescueAttempts = [
-        cleaned + '"]}]}', cleaned + '"}]}', cleaned + '}]}', cleaned + ']}', cleaned + '}'
-      ];
+      const rescueAttempts = [cleaned + '"]}]}', cleaned + '"}]}', cleaned + '}]}', cleaned + ']}', cleaned + '}'];
       for (const attempt of rescueAttempts) {
-        try { return JSON.parse(attempt); } catch (e2) { }
+        try { return JSON.parse(attempt); } catch (_) { }
       }
-      let lastGoodBoundary = cleaned.lastIndexOf('},');
-      if (lastGoodBoundary === -1) lastGoodBoundary = cleaned.lastIndexOf('}');
-      if (lastGoodBoundary > -1) {
-        const truncated = cleaned.substring(0, lastGoodBoundary + 1);
-        for (const r of [truncated + ']}', truncated + ']} ]}', truncated + '}']) {
-          try { return JSON.parse(r); } catch (e3) { }
+      let lastGood = cleaned.lastIndexOf('},');
+      if (lastGood === -1) lastGood = cleaned.lastIndexOf('}');
+      if (lastGood > -1) {
+        const t = cleaned.substring(0, lastGood + 1);
+        for (const r of [t + ']}', t + ']} ]}', t + '}']) {
+          try { return JSON.parse(r); } catch (_) { }
         }
       }
-      console.error("All repair attempts failed.");
     }
     throw e;
   }
 }
 
-// Ordered list of models to try — most capable first.
-// If a model returns 404 we skip to the next automatically.
 const GEMINI_MODELS = [
   "gemini-2.0-flash-001",
-  "gemini-1.5-flash",
-  "gemini-1.5-flash-latest",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash-8b",
+  "gemini-1.5-pro",
 ];
 
 async function callGemini(messages: any[], apiKey: string) {
@@ -58,197 +53,197 @@ async function callGemini(messages: any[], apiKey: string) {
     parts.push({ text: userMessage.content });
   } else {
     for (const part of userMessage.content) {
-      if (part.type === "text") {
-        parts.push({ text: part.text });
-      } else if (part.type === "image_url") {
-        const imageUrl = part.image_url.url || part.image_url;
-        const match = imageUrl.match(/^data:([^;]+);base64,(.+)$/);
-        if (match) {
-          parts.push({ inline_data: { mime_type: match[1], data: match[2] } });
-        }
+      if (part.type === "text") parts.push({ text: part.text });
+      else if (part.type === "image_url") {
+        const url = part.image_url.url || part.image_url;
+        const match = url.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) parts.push({ inline_data: { mime_type: match[1], data: match[2] } });
       }
     }
   }
 
-  const geminiPayload = {
+  const payload = {
     system_instruction: { parts: [{ text: systemMessage }] },
     contents: [{ role: "user", parts }],
-    generationConfig: {
-      temperature: 0.6, topK: 40, topP: 0.95,
-      maxOutputTokens: 8192, responseMimeType: "application/json",
-    },
+    generationConfig: { temperature: 0.2, topK: 40, topP: 0.95, maxOutputTokens: 4096, responseMimeType: "application/json" },
   };
 
-  // Try each model in order until one succeeds
   let lastError: Error | null = null;
-  for (const modelName of GEMINI_MODELS) {
-    console.log(`Trying Gemini model: ${modelName}`);
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(geminiPayload) }
+  for (const model of GEMINI_MODELS) {
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }
     );
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      if (response.status === 429) {
-        throw { isQuotaError: true, retryAfter: 15, message: "Gemini quota exceeded." };
-      }
-      if (response.status === 404) {
-        console.warn(`Model ${modelName} not found, trying next...`);
-        lastError = new Error(`Model ${modelName} not available`);
-        continue; // try next model
-      }
-      throw new Error(`Gemini API Error ${response.status}: ${JSON.stringify(errorData)}`);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      if (resp.status === 429) throw { isQuotaError: true, retryAfter: 15, message: "Quota exceeded" };
+      if (resp.status === 404 || resp.status === 400) { lastError = new Error(`Model ${model} unavailable`); continue; }
+      throw new Error(`Gemini ${resp.status}: ${JSON.stringify(err)}`);
     }
-
-    const result = await response.json();
-    const textContent = result.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!textContent) throw new Error("Empty response from Gemini");
-    console.log(`✅ Gemini model ${modelName} succeeded`);
-    return cleanRepairAndParseJson(textContent);
+    const result = await resp.json();
+    const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) throw new Error("Empty Gemini response");
+    console.log(`✅ ${model} succeeded`);
+    return cleanRepairAndParseJson(text);
   }
-
   throw lastError || new Error("All Gemini models unavailable");
 }
 
 async function callClaude(messages: any[], apiKey: string) {
-  const userMessages = messages.filter(m => m.role === "user");
-  const systemPrompt = messages.filter(m => m.role === "system").map(m => m.content).join("\n");
-
-  const claudeMessages = userMessages.map(msg => {
+  const systemPrompt = messages.filter(m => m.role === "system").map((m: any) => m.content).join("\n");
+  const claudeMessages = messages.filter(m => m.role === "user").map((msg: any) => {
     if (typeof msg.content === "string") return { role: "user", content: msg.content };
     return {
       role: "user",
-      content: msg.content.map((part: any) => {
-        if (part.type === "text") return { type: "text", text: part.text };
-        if (part.type === "image_url") {
-          const imageUrl = part.image_url.url || part.image_url;
-          const match = imageUrl.match(/^data:(.+);base64,(.+)$/);
+      content: msg.content.map((p: any) => {
+        if (p.type === "text") return { type: "text", text: p.text };
+        if (p.type === "image_url") {
+          const url = p.image_url.url || p.image_url;
+          const match = url.match(/^data:(.+);base64,(.+)$/);
           if (match) return { type: "image", source: { type: "base64", media_type: match[1], data: match[2] } };
-          return { type: "image", source: { type: "url", url: imageUrl } };
         }
-        return part;
+        return p;
       }),
     };
   });
-
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-3-5-sonnet-20241022",
-      max_tokens: 4096,
-      system: (systemPrompt || "You are a helpful AI assistant.") + " Always respond with valid, raw JSON. No markdown code blocks.",
-      messages: claudeMessages,
-    }),
+    body: JSON.stringify({ model: "claude-3-5-sonnet-20241022", max_tokens: 4096, system: systemPrompt + " Always respond with valid JSON.", messages: claudeMessages }),
   });
-
-  if (!response.ok) throw new Error("Claude error: " + response.status + " - " + await response.text());
-  return cleanRepairAndParseJson((await response.json()).content[0].text);
+  if (!resp.ok) throw new Error("Claude " + resp.status + ": " + await resp.text());
+  return cleanRepairAndParseJson((await resp.json()).content[0].text);
 }
 
 async function callAI(messages: any[], keys: { gemini?: string; claude?: string } = {}) {
   const errors: string[] = [];
-
-  const geminiKey = keys.gemini || GEMINI_API_KEY;
-  if (geminiKey) {
-    try {
-      const result = await callGemini(messages, geminiKey);
-      return { result, provider: "gemini" };
-    } catch (error: any) {
-      if (error.isQuotaError) throw error;
-      console.warn("Gemini failed:", error.message);
-      errors.push("Gemini: " + (error.message || String(error)));
-    }
+  const gKey = keys.gemini || GEMINI_API_KEY;
+  if (gKey) {
+    try { return { result: await callGemini(messages, gKey), provider: "gemini" }; }
+    catch (e: any) { if (e.isQuotaError) throw e; errors.push("Gemini: " + e.message); }
   }
-
-  const claudeKey = keys.claude || ANTHROPIC_API_KEY;
-  if (claudeKey) {
-    try {
-      const result = await callClaude(messages, claudeKey);
-      return { result, provider: "claude" };
-    } catch (error: any) {
-      console.warn("Claude failed:", error.message);
-      errors.push("Claude: " + (error.message || String(error)));
-    }
+  const cKey = keys.claude || ANTHROPIC_API_KEY;
+  if (cKey) {
+    try { return { result: await callClaude(messages, cKey), provider: "claude" }; }
+    catch (e: any) { errors.push("Claude: " + e.message); }
   }
-
-  throw new Error("All AI providers failed. " + errors.join(" | "));
+  throw new Error("All AI providers failed: " + errors.join(" | "));
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { status: 200, headers: CORS_HEADERS });
-  }
+  if (req.method === "OPTIONS") return new Response("ok", { status: 200, headers: CORS_HEADERS });
 
   try {
     const body = await req.json();
     const { mode, image, images, markingScheme, testParams, geminiKey } = body;
+    const buildParts = () => (images || (image ? [image] : [])).map((img: string) => ({ type: "image_url", image_url: { url: img } }));
 
-    const buildImageParts = () => {
-      const allImages = images || (image ? [image] : []);
-      return allImages.map((img: string) => ({ type: "image_url", image_url: { url: img } }));
-    };
-
-    const activeGeminiKey = geminiKey || GEMINI_API_KEY;
-    if (!activeGeminiKey && !ANTHROPIC_API_KEY) {
-      return jsonResponse({ error: "No AI provider API keys configured." }, 500);
-    }
+    if (!(geminiKey || GEMINI_API_KEY) && !ANTHROPIC_API_KEY) return jsonResponse({ error: "No API keys configured" }, 500);
 
     let messages: any[] = [];
 
     if (mode === "generate_test") {
       if (!testParams) throw new Error("testParams is required");
       const { subject, grade, topics, difficulty, existingQuestions } = testParams;
-      let topicList = "", totalQuestions = 0;
-      if (topics && Array.isArray(topics)) {
-        topicList = topics.map((t: any) => `${t.name}(${t.count})`).join(", ");
-        totalQuestions = topics.reduce((sum: number, t: any) => sum + (parseInt(t.count) || 0), 0);
-      } else {
-        topicList = testParams.topic;
-        totalQuestions = testParams.numQuestions;
-      }
-      const cognitiveLevel = difficulty === "Basic" ? "recall & understanding" : difficulty === "Advanced" ? "analysis & evaluation" : "application & interpretation";
+      let topicList = "", total = 0;
+      if (Array.isArray(topics)) { topicList = topics.map((t: any) => `${t.name}(${t.count})`).join(", "); total = topics.reduce((s: number, t: any) => s + (parseInt(t.count) || 0), 0); }
+      else { topicList = testParams.topic; total = testParams.numQuestions; }
+      const cog = difficulty === "Basic" ? "recall & understanding" : difficulty === "Advanced" ? "analysis & evaluation" : "application & interpretation";
       messages = [
-        { role: "system", content: `You are an expert curriculum designer for the Zambian Ministry of Education. Generate strictly valid JSON. No markdown code blocks.\nResponse Schema:\n{\n  "questions": [\n    {\n      "question_text": "string",\n      "type": "multiple_choice",\n      "options": ["A", "B", "C", "D"],\n      "correct_answer": "A",\n      "marks": number,\n      "topic": "string",\n      "cognitive_level": "Knowledge|Application|Analysis",\n      "difficulty_score": 1-10,\n      "explanation": "string"\n    }\n  ]\n}` },
-        { role: "user", content: `Generate ${totalQuestions} curriculum-aligned ${subject} questions for ${grade}.\nFocus Topics: ${topicList}\nTarget Difficulty: ${difficulty} (${cognitiveLevel})\n${existingQuestions?.length > 0 ? `IMPORTANT: Do NOT generate questions similar to these existing ones: ${existingQuestions.join(", ")}` : ""}\nEnsure:\n1. Questions are age-appropriate and technically accurate.\n2. Distractors are plausible but clearly incorrect.\n3. Bloom's Taxonomy levels match the target difficulty.\n4. Explanations provided are clear and helpful for teachers.` },
+        { role: "system", content: `Expert curriculum designer for Zambian Ministry of Education. Generate strictly valid JSON.\nSchema: {"questions":[{"question_text":"string","type":"multiple_choice","options":["A","B","C","D"],"correct_answer":"A","marks":1,"topic":"string","cognitive_level":"string","difficulty_score":5,"explanation":"string"}]}` },
+        { role: "user", content: `Generate ${total} ${difficulty} ${subject} questions for ${grade}. Topics: ${topicList}.${existingQuestions?.length > 0 ? ` Avoid: ${existingQuestions.join(", ")}` : ""}` },
       ];
-
     } else if (mode === "generate_key") {
-      if (!image) throw new Error("image is required");
+      if (!image) throw new Error("image required");
       messages = [
-        { role: "system", content: `You are an expert OCR and curriculum analyzer. Extract text accurately from the provided test paper image. Always respond with strictly valid JSON.\nResponse Schema:\n{\n  "questions": [\n    {\n      "question_number": number,\n      "question_text": "string",\n      "options": ["string", "string", "string", "string"],\n      "correct_answer": "string",\n      "topic": "string",\n      "subtopic": "string",\n      "learning_outcome": "string"\n    }\n  ],\n  "topic_summary": { "Topic Name": number_of_occurrences }\n}` },
-        { role: "user", content: [{ type: "text", text: "Analyze this test paper image. Extract all questions, options, and correct answers according to the strict JSON schema provided." }, ...buildImageParts()] },
+        { role: "system", content: `Expert OCR analyzer. Respond with strictly valid JSON.\nSchema: {"questions":[{"question_number":1,"question_text":"string","options":["string"],"correct_answer":"string","topic":"string","subtopic":"string","learning_outcome":"string"}],"topic_summary":{"Topic":1}}` },
+        { role: "user", content: [{ type: "text", text: "Extract all questions from this test paper per the JSON schema." }, ...buildParts()] },
       ];
-
     } else if (mode === "mark_script") {
-      if ((!image && (!images || images.length === 0)) || !markingScheme) throw new Error("image(s) and markingScheme are required");
-      const numImages = (images && images.length > 0) ? images.length : 1;
-      messages = [
-        { role: "system", content: `You are an expert examiner grading student handwritten test scripts against a provided marking scheme.\nAlways respond with strictly valid JSON.\n\nCRITICAL INSTRUCTIONS:\n1. You have been provided with ${numImages} image(s). Assume EACH image is a separate student's test script.\n2. Extract the student's name from the top of the paper. If unreadable, return "Unknown".\n3. Evaluate each handwritten answer against the correct answer in the marking scheme.\n4. If handwriting is crossed out, evaluate the latest answer.\n5. If illegible, mark incorrect, confidence "Low", feedback "Illegible handwriting".\n6. If blank, mark incorrect, student_answer "Unanswered".\n\nResponse Schema:\n{\n  "results": [\n    {\n      "studentName": "string",\n      "student_id": "string",\n      "grade": "string",\n      "image_index": number,\n      "answers": [\n        {\n          "question_number": number,\n          "student_answer": "string",\n          "is_correct": boolean,\n          "feedback": "string",\n          "confidence": "High|Medium|Low"\n        }\n      ]\n    }\n  ]\n}` },
-        { role: "user", content: [{ type: "text", text: `Evaluate these ${numImages} student handwritten test script(s) against the following marking scheme:\n\n${JSON.stringify(markingScheme, null, 2)}\n\nIMPORTANT: Output a distinct result object in the "results" array for EACH student script. Since there are ${numImages} images, output at least ${numImages} objects.` }, ...buildImageParts()] },
-      ];
+      if (!image && (!images || images.length === 0)) throw new Error("image required");
+      if (!markingScheme) throw new Error("markingScheme required");
 
+      const schemeText = JSON.stringify(markingScheme, null, 2);
+
+      messages = [
+        {
+          role: "system",
+          content: `You are an expert examiner grading a student's handwritten test script.
+Respond with STRICTLY VALID JSON only — no markdown, no commentary.
+
+══ ANSWER TYPE DETECTION ══
+For each question, first determine HOW the student answered, then extract accordingly:
+
+1. LETTER MCQ — Student wrote a letter (A/B/C/D) next to a question number.
+   → Extract the letter as-is. Accept both capital and lowercase.
+
+2. SHADED / FILLED BUBBLE — Student filled or shaded a circle from a row of options (A B C D).
+   → Identify the darkest, most completely filled circle as the answer.
+   → If two circles appear equally filled, pick the one more completely shaded.
+   → Report as the corresponding letter (A, B, C, or D).
+
+3. SHORT WRITTEN ANSWER / PHRASE — Student wrote a word, phrase, or sentence.
+   → Extract the exact text the student wrote.
+   → Compare SEMANTICALLY against the correct answer in the marking scheme.
+   → Mark correct if the meaning is equivalent, even if worded differently.
+   → Ignore capitalisation and minor spelling errors.
+
+4. NUMERIC ANSWER — Student wrote a number.
+   → Extract the number. Accept equivalent forms (e.g. 0.5 = 1/2 = 50%).
+   → Mark correct if within reasonable rounding for the context.
+
+══ GENERAL RULES ══
+- Extract student name and ID from the top of the paper. If unreadable, use "Unknown".
+- If handwriting is crossed out, evaluate ONLY the final uncrossed answer.
+- If an answer is completely illegible: is_correct=false, confidence="Low", feedback="Illegible handwriting".
+- If a question is left blank: student_answer="Unanswered", is_correct=false.
+- Be generous with confidence="High" only when the answer is unambiguously clear.
+
+══ MARKING SCHEME ══
+${schemeText}
+
+══ RESPONSE SCHEMA ══
+{
+  "results": [{
+    "studentName": "string",
+    "student_id": "string",
+    "grade": "string",
+    "answers": [{
+      "question_number": 1,
+      "answer_type": "letter_mcq|shaded_bubble|short_written|numeric",
+      "student_answer": "string",
+      "is_correct": true,
+      "feedback": "string (empty if correct, explanation if wrong)",
+      "confidence": "High|Medium|Low"
+    }]
+  }]
+}`
+        },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Grade this student's test script. Follow all instructions in the system prompt exactly." },
+            ...buildParts()
+          ]
+        }
+      ];
     } else if (mode === "solve_questions") {
-      if (!testParams?.questions) throw new Error("testParams.questions is required");
+      if (!testParams?.questions) throw new Error("testParams.questions required");
       messages = [
-        { role: "system", content: `You are an expert examiner. Provide the correct answer and a brief explanation for each question.\nAlways respond with strictly valid JSON.\nResponse Schema:\n{\n  "questions": [\n    {\n      "question_number": number,\n      "question_text": "string",\n      "options": ["A", "B", "C", "D"],\n      "correct_answer": "A|B|C|D",\n      "explanation": "string"\n    }\n  ]\n}` },
-        { role: "user", content: `Please solve the following questions:\n${JSON.stringify(testParams.questions, null, 2)}` },
+        { role: "system", content: `Expert examiner. Respond with strictly valid JSON.\nSchema: {"questions":[{"question_number":1,"question_text":"string","options":["A","B","C","D"],"correct_answer":"A","explanation":"string"}]}` },
+        { role: "user", content: `Solve:\n${JSON.stringify(testParams.questions, null, 2)}` },
       ];
-
     } else {
       throw new Error("Invalid mode: " + mode);
     }
 
     const { result, provider } = await callAI(messages, { gemini: geminiKey });
-    console.log(`AI succeeded with ${provider}`);
+    console.log(`Done: ${provider}, mode: ${mode}`);
     return jsonResponse({ ...result, _provider: provider });
 
   } catch (error: any) {
-    console.error("Function error:", error);
-    if (error.isQuotaError) {
-      return jsonResponse({ error: "quota_exceeded", retry_after: error.retryAfter || 15, message: error.message }, 429);
-    }
+    console.error("Error:", error);
+    if (error.isQuotaError) return jsonResponse({ error: "quota_exceeded", retry_after: error.retryAfter || 15, message: error.message }, 429);
     return jsonResponse({ error: "ai_provider_failed", message: error.message || "Unknown error" }, 500);
   }
 });
