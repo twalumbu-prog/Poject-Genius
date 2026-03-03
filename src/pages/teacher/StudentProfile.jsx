@@ -189,39 +189,39 @@ export default function StudentProfile() {
     const moreSubjects = subjects.slice(VISIBLE_TABS);
 
     return (
-        <div className="student-profile-page">
-            {/* Top nav */}
+        <div className="student-profile-page container">
+            {/* Top nav - keeping it simple but aligned */}
             <div className="profile-nav">
                 <span className="profile-brand">Project Genius</span>
             </div>
 
-            {/* Back */}
+            {/* Back Row */}
             <div className="profile-back-row">
-                <button className="back-button" onClick={() => navigate('/teacher/students')}>
-                    <ArrowLeft size={20} />
-                    Back
+                <button className="btn btn-ghost btn-sm" onClick={() => navigate('/teacher/students')}>
+                    <ArrowLeft size={18} />
+                    Back to Students
                 </button>
             </div>
 
-            {/* Student Name */}
+            {/* Student Header - Focused Identity */}
             <div className="profile-header-meta">
                 <div className="profile-identity">
                     <h1 className="profile-name">{pupil.name}</h1>
-                    <div className="profile-tags" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        {pupil.grade && <span className="profile-grade">{pupil.grade}</span>}
-                        {pupil.student_id && <span className="profile-id" style={{
-                            background: 'var(--color-bg-secondary)',
-                            color: 'var(--color-text-secondary)',
-                            padding: '4px 10px',
-                            borderRadius: 'var(--radius-full)',
-                            fontSize: '13px',
-                            fontWeight: 'bold',
-                            border: '1px solid var(--color-border)'
-                        }}>{pupil.student_id}</span>}
+                    <div className="profile-meta-row">
+                        {pupil.grade && (
+                            <span className="meta-badge grade-badge">
+                                <GraduationCap size={14} />
+                                {pupil.grade}
+                            </span>
+                        )}
+                        <span className="meta-badge id-badge">
+                            <Hash size={14} />
+                            {pupil.student_id || pupil.id.slice(0, 8)}
+                        </span>
                     </div>
                 </div>
                 <button
-                    className="btn-report"
+                    className="btn btn-primary"
                     onClick={() => setShowReportModal(true)}
                 >
                     <FileText size={18} />
@@ -229,45 +229,20 @@ export default function StudentProfile() {
                 </button>
             </div>
 
-            {/* Subject Tabs */}
+            {/* Subject Tabs - Modern Pill Style */}
             {subjects.length > 0 && (
-                <div className="subject-tabs-row">
-                    {visibleSubjects.map(subj => (
-                        <button
-                            key={subj}
-                            className={`subject-tab ${activeSubject === subj ? 'active' : ''}`}
-                            onClick={() => { setActiveSubject(subj); setExpandedTopic(null); }}
-                        >
-                            {subj}
-                        </button>
-                    ))}
-                    {moreSubjects.length > 0 && (
-                        <div className="more-subjects-wrapper">
+                <div className="subject-tabs-scroll">
+                    <div className="subject-tabs-pills">
+                        {subjects.map(subj => (
                             <button
-                                className={`subject-tab more-tab ${showMoreSubjects ? 'active' : ''}`}
-                                onClick={() => setShowMoreSubjects(!showMoreSubjects)}
+                                key={subj}
+                                className={`subject-pill ${activeSubject === subj ? 'active' : ''}`}
+                                onClick={() => { setActiveSubject(subj); setExpandedTopic(null); }}
                             >
-                                +{moreSubjects.length} More...
+                                {subj}
                             </button>
-                            {showMoreSubjects && (
-                                <div className="more-dropdown">
-                                    {moreSubjects.map(subj => (
-                                        <button
-                                            key={subj}
-                                            className={`more-dropdown-item ${activeSubject === subj ? 'active' : ''}`}
-                                            onClick={() => {
-                                                setActiveSubject(subj);
-                                                setExpandedTopic(null);
-                                                setShowMoreSubjects(false);
-                                            }}
-                                        >
-                                            {subj}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    )}
+                        ))}
+                    </div>
                 </div>
             )}
 
@@ -392,15 +367,19 @@ export default function StudentProfile() {
                                             onClick={() => setExpandedTopic(isTopicOpen ? null : topic.id)}
                                         >
                                             <div className="topic-info">
-                                                <BookOpen size={18} className="topic-icon" />
+                                                <div className="topic-icon-wrapper">
+                                                    <BookOpen size={18} />
+                                                </div>
                                                 <span className="topic-accordion-name">{topic.name}</span>
                                             </div>
                                             <div className="topic-meta">
-                                                <span className={`topic-status-badge ${config.className}`}>
+                                                <span className={`badge ${hasAttempts ? `badge-${config.label.toLowerCase()}` : 'badge-unattempted'}`}>
                                                     {config.label}
                                                     {hasAttempts && <span className="perc">{avg}%</span>}
                                                 </span>
-                                                {isTopicOpen ? <ChevronUp size={20} /> : <ChevronRight size={20} />}
+                                                <div className="chevron-icon">
+                                                    {isTopicOpen ? <ChevronUp size={18} /> : <ChevronRight size={18} />}
+                                                </div>
                                             </div>
                                         </button>
 
