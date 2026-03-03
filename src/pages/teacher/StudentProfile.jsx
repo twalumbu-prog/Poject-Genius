@@ -70,7 +70,7 @@ export default function StudentProfile() {
 
             const resultIds = (resultsData || []).map(r => r.id);
             if (resultIds.length === 0) {
-                setSubjectData({});
+                setSubjectData(hierarchy);
                 setSubjects(Object.keys(hierarchy));
                 setActiveSubject(Object.keys(hierarchy)[0] || null);
                 setLoading(false);
@@ -249,20 +249,26 @@ export default function StudentProfile() {
                 </div>
             )}
 
-            {/* Topic Cards */}
             {subjects.length === 0 && (
                 <div className="profile-empty">
                     {pupil.grade ? (
                         <>
-                            <p>No topic-level analysis available yet.</p>
-                            <p className="profile-empty-sub">Analyze a test with topics to see performance data here.</p>
+                            <p>No syllabus subjects found in the database.</p>
+                            <p className="profile-empty-sub">Please ensure the syllabus is seeded correctly.</p>
                         </>
                     ) : (
                         <>
                             <p>Student grade is not set.</p>
-                            <p className="profile-empty-sub">Edit the student's profile or mark a test for them to assign a grade and view their full curriculum tracker.</p>
+                            <p className="profile-empty-sub">Edit the student's profile to assign a grade and view their full curriculum tracker.</p>
                         </>
                     )}
+                </div>
+            )}
+
+            {activeSubject && termEntries.length === 0 && (
+                <div className="profile-empty" style={{ minHeight: '200px' }}>
+                    <p>No topics defined for {activeSubject} in {pupil.grade || 'this grade'}.</p>
+                    <p className="profile-empty-sub">Topics will appear here once they are added to the syllabus database.</p>
                 </div>
             )}
 

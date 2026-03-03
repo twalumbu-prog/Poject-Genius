@@ -1,11 +1,35 @@
 -- Seed script for English Grade 2 - 7 Syllabus
 -- Based on the provided curriculum 2013
 
--- 1. Ensure English subject exists
-INSERT INTO public.subjects (id, name) 
-VALUES ('e0000000-0000-0000-0000-000000000001', 'English Language') 
-ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-RETURNING id;
+-- 1. Ensure Subjects exist
+INSERT INTO public.subjects (id, name) VALUES 
+('e0000000-0000-0000-0000-000000000001', 'English Language'),
+('e0000000-0000-0000-0000-000000000002', 'Mathematics'),
+('e0000000-0000-0000-0000-000000000003', 'Science'),
+('e0000000-0000-0000-0000-000000000004', 'Social Studies'),
+('e0000000-0000-0000-0000-000000000005', 'Religious Education'),
+('e0000000-0000-0000-0000-000000000006', 'Creative & Technology Studies'),
+('e0000000-0000-0000-0000-000000000007', 'Physical Education')
+ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name;
+
+
+-- ==========================================
+-- GRADE 1 ENGLISH (Placeholder)
+-- ==========================================
+
+INSERT INTO public.topics (id, subject_id, name, grade, term, code)
+VALUES (
+  'e01-01-0000-0000-0000-000000000000', 
+  'e0000000-0000-0000-0000-000000000001', 
+  'Oral Language', 
+  'Grade 1', 
+  1, 
+  'ENG-G1-T1-OL'
+) ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO public.subtopics (id, topic_id, name, code)
+VALUES ('e01-01-01-00-00-00-000000000000', 'e01-01-0000-0000-0000-000000000000', 'Pre-reading skills', 'ENG-G1-T1-OL-S1')
+ON CONFLICT (code) DO NOTHING;
 
 
 -- ==========================================

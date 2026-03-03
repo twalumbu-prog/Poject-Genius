@@ -9,27 +9,39 @@ export const SyllabusService = {
      * Fetch the full structured syllabus for a specific grade
      */
     async getSyllabusForGrade(grade) {
-        // 1. Fetch all topics for this grade
+        // 1. Fetch all subjects first (to ensure they always show up)
+        const { data: allSubjects, error: subjectsError } = await supabase
+            .from('subjects')
+            .select('id, name')
+            .order('name', { ascending: true });
+
+        if (subjectsError) throw subjectsError;
+
+        // Initialize hierarchy with all subjects
+        const hierarchy = {};
+        allSubjects.forEach(s => {
+            hierarchy[s.name] = {};
+        });
+
+        // 2. Fetch topics for this grade
         const { data: topics, error: topicsError } = await supabase
             .from('topics')
             .select(`
-        id,
-        name,
-        grade,
-        term,
-        code,
-        subject_id,
-        subjects(name)
-      `)
+                id,
+                name,
+                grade,
+                term,
+                code,
+                subject_id,
+                subjects(name)
+            `)
             .eq('grade', grade)
             .order('term', { ascending: true })
             .order('name', { ascending: true });
 
         if (topicsError) throw topicsError;
 
-        // 2. Fetch all subtopics for these topics
-        const topicIds = topics.map(t => t.id);
-        if (topicIds.length === 0) return {};
+        if (topics.length === 0) return hierarchy;
 
         const { data: subtopics, error: subError } = await supabase
             .from('subtopics')
@@ -53,8 +65,6 @@ export const SyllabusService = {
         }
 
         // 4. Assemble Hierarchy
-        const hierarchy = {};
-
         topics.forEach(t => {
             const subjectName = t.subjects?.name || 'Unknown';
             if (!hierarchy[subjectName]) hierarchy[subjectName] = {};
