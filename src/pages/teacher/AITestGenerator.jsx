@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { supabase } from '../../lib/supabase';
 import { ArrowLeft, Sparkles, Wand2, BookOpen, Layers, Check, Calculator, PieChart } from 'lucide-react';
-import { SYLLABUS_DATA, getTopics } from '../../data/ecz_syllabus';
 import './AITestGenerator.css';
 
 const SUBJECTS = [
@@ -31,6 +30,39 @@ export default function AITestGenerator() {
     });
     const [genPhase, setGenPhase] = useState(0);
     const [availableTopics, setAvailableTopics] = useState([]);
+    const [topicsLoading, setTopicsLoading] = useState(false);
+
+    // Fetch topics from live DB whenever subject or grade changes
+    const fetchTopicsFromDB = async (subject, grade) => {
+        if (!subject || !grade) { setAvailableTopics([]); return; }
+        setTopicsLoading(true);
+        try {
+            // 1. Find the matching subject ID
+            const { data: subjectRows } = await supabase
+                .from('subjects')
+                .select('id')
+                .ilike('name', subject)
+                .limit(1);
+
+            if (!subjectRows?.length) { setAvailableTopics([]); return; }
+
+            // 2. Fetch topics for that subject + grade, ordered by term then name
+            const { data: topicRows } = await supabase
+                .from('topics')
+                .select('id, name, term, code')
+                .eq('subject_id', subjectRows[0].id)
+                .eq('grade', grade)
+                .order('term', { ascending: true })
+                .order('name', { ascending: true });
+
+            setAvailableTopics(topicRows || []);
+        } catch (err) {
+            console.error('Error fetching topics from DB:', err);
+            setAvailableTopics([]);
+        } finally {
+            setTopicsLoading(false);
+        }
+    };
 
     const PHASES = [
         "Consulting the knowledge base...",
@@ -58,11 +90,9 @@ export default function AITestGenerator() {
             // Reset topics if subject or grade changes
             if (name === 'subject' || name === 'grade') {
                 newData.selectedTopics = [];
-                if (name === 'subject') {
-                    setAvailableTopics(getTopics(value, prev.grade));
-                } else {
-                    setAvailableTopics(getTopics(prev.subject, value));
-                }
+                const newSubject = name === 'subject' ? value : prev.subject;
+                const newGrade = name === 'grade' ? value : prev.grade;
+                fetchTopicsFromDB(newSubject, newGrade);
             }
 
             // Distribute questions if total changes
@@ -396,8 +426,16 @@ export default function AITestGenerator() {
                         </div>
                     </div>
 
-                    {/* Manual Topic Fallback */}
-                    {formData.subject && formData.grade && availableTopics.length === 0 && (
+                    {/* Loading indicator while fetching topics from DB */}
+                    {formData.subject && formData.grade && topicsLoading && (
+                        <div className="topics-loading">
+                            <div className="spinner" style={{ width: 24, height: 24, borderWidth: 3 }} />
+                            <span>Loading topics from syllabus...</span>
+                        </div>
+                    )}
+
+                    {/* Manual Topic Fallback — only shown once fetch is done and nothing found */}
+                    {formData.subject && formData.grade && !topicsLoading && availableTopics.length === 0 && (
                         <div className="form-group slide-in-up">
                             <label className="label">Topic or Curriculum Area</label>
                             <input
@@ -410,16 +448,16 @@ export default function AITestGenerator() {
                                 required={availableTopics.length === 0}
                             />
                             <p className="input-hint">
-                                No pre-defined syllabus topics found for this level. Please enter a topic manually.
+                                No pre-defined syllabus topics found for this subject and grade yet. Enter a topic manually.
                             </p>
                         </div>
                     )}
 
-                    {availableTopics.length > 0 && (
+                    {!topicsLoading && availableTopics.length > 0 && (
                         <div className="topics-selection-section">
                             <h3 className="section-title">
                                 <Layers size={18} />
-                                Select Topics & Distribution
+                                Select Topics &amp; Distribution
                             </h3>
                             <div className="topics-grid">
                                 {availableTopics.map(topic => {
@@ -433,7 +471,12 @@ export default function AITestGenerator() {
                                             <div className="checkbox-ring">
                                                 {isSelected && <div className="checkbox-dot" />}
                                             </div>
-                                            <span>{topic.name}</span>
+                                            <div className="topic-card-info">
+                                                <span>{topic.name}</span>
+                                                {topic.term && (
+                                                    <span className="topic-term-chip">Term {topic.term}</span>
+                                                )}
+                                            </div>
                                         </div>
                                     );
                                 })}

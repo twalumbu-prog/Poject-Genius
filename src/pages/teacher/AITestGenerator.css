@@ -195,6 +195,48 @@
     font-weight: var(--font-weight-semibold);
 }
 
+.topic-card-info {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
+}
+
+.topic-card-info>span:first-child {
+    font-size: var(--font-size-sm);
+    font-weight: 700;
+    color: var(--color-text-primary);
+    line-height: 1.3;
+}
+
+.topic-term-chip {
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--color-text-tertiary);
+}
+
+.topic-checkbox-card.selected .topic-term-chip {
+    color: var(--color-accent-secondary);
+}
+
+/* Loading indicator for topic fetch */
+.topics-loading {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-lg);
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-lg);
+    border: 2px solid var(--color-border-light);
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-sm);
+    font-weight: 700;
+    margin-top: var(--spacing-md);
+}
+
 .topic-checkbox-card:hover {
     border-color: var(--color-accent-primary);
     transform: translateY(-2px);
