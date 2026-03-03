@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { SyllabusService } from '../../lib/syllabusService';
-import { ArrowLeft, ChevronDown, ChevronRight, ChevronUp, FileText, Target, BookOpen, Layers } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronRight, ChevronUp, FileText, Target, BookOpen, Layers, GraduationCap, Hash } from 'lucide-react';
 import { SYLLABUS_DATA } from '../../data/ecz_syllabus';
 import PerformanceGraph from '../../components/teacher/PerformanceGraph';
 import ReportCardModal from '../../components/teacher/ReportCardModal';
