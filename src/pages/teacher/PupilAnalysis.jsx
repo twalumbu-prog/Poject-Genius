@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
-import { ArrowLeft, TrendingUp, TrendingDown, CheckCircle, XCircle, Camera } from 'lucide-react';
+import { ArrowLeft, TrendingUp, TrendingDown, CheckCircle, XCircle, Camera, Trash2, RefreshCcw } from 'lucide-react';
 import { formatPercentage } from '../../utils/formatters';
 import './Page.css';
 
@@ -55,6 +55,31 @@ export default function PupilAnalysis() {
         }
     }
 
+    const handleRescan = () => {
+        navigate(`/teacher/test/${testId}/mark`);
+    };
+
+    const handleDeleteResult = async () => {
+        if (!confirm(`Are you sure you want to delete the result for ${pupil.name}? This cannot be undone.`)) {
+            return;
+        }
+
+        try {
+            const { error } = await supabase
+                .from('results')
+                .delete()
+                .eq('id', result.id);
+
+            if (error) throw error;
+
+            // Navigate back to results list since this analysis no longer exists
+            navigate(`/teacher/test/${testId}`);
+        } catch (error) {
+            console.error('Error deleting result:', error);
+            alert('Failed to delete result. Please try again.');
+        }
+    };
+
     if (loading) {
         return <div className="loading-container">Loading...</div>;
     }
@@ -70,8 +95,26 @@ export default function PupilAnalysis() {
                 Back to Results
             </button>
 
-            <div className="page-header">
-                <h1>{pupil.name}</h1>
+            <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                    <h1>{pupil.name}</h1>
+                    <div className="header-actions-inline" style={{ marginTop: '8px', display: 'flex', gap: '12px' }}>
+                        <button
+                            className="icon-action-btn rescan-btn"
+                            title="Rescan Script"
+                            onClick={handleRescan}
+                        >
+                            <RefreshCcw size={18} />
+                        </button>
+                        <button
+                            className="icon-action-btn delete-btn"
+                            title="Delete Result"
+                            onClick={handleDeleteResult}
+                        >
+                            <Trash2 size={18} />
+                        </button>
+                    </div>
+                </div>
                 <div className="overall-score">
                     <span className="score-label">Overall Score</span>
                     <span className="score-value">{formatPercentage(result.percentage)}</span>

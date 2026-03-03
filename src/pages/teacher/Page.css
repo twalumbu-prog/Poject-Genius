@@ -351,6 +351,12 @@
     opacity: 1;
 }
 
+.header-actions-inline {
+    display: flex;
+    gap: var(--spacing-md);
+    margin-top: var(--spacing-sm);
+}
+
 .icon-action-btn {
     width: 38px;
     height: 38px;
