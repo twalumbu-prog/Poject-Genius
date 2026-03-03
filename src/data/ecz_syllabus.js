@@ -1,5 +1,7 @@
+import { SyllabusService } from '../lib/syllabusService';
+
 /**
- * Mock ECZ Syllabus Data
+ * Mock ECZ Syllabus Data (Fallback)
  * Structure: Subject -> Grade -> Topics
  */
 
@@ -202,4 +204,18 @@ export const SYLLABUS_DATA = {
 export const getTopics = (subject, grade) => {
     if (!subject || !grade) return [];
     return SYLLABUS_DATA[subject]?.[grade] || [];
+};
+
+/**
+ * Dynamic Syllabus Fetcher
+ * Fetches the full structured hierarchy from the database
+ */
+export const getDynamicSyllabus = async (grade) => {
+    try {
+        return await SyllabusService.getSyllabusForGrade(grade);
+    } catch (error) {
+        console.error("Error fetching dynamic syllabus:", error);
+        // Transform static mock to match the hierarchical format if needed
+        return {};
+    }
 };

@@ -343,3 +343,170 @@
     color: var(--color-text-tertiary);
     font-weight: 500;
 }
+
+/* ========= SYLLABUS HIERARCHY ========= */
+.syllabus-hierarchy {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3xl);
+}
+
+.term-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-lg);
+}
+
+.term-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    color: var(--color-text-tertiary);
+    padding-left: var(--spacing-xs);
+}
+
+.term-header h3 {
+    font-size: var(--font-size-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 900;
+}
+
+/* ========= NESTED LEVELS ========= */
+.topic-info {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    flex: 1;
+}
+
+.topic-icon {
+    color: var(--color-accent-primary);
+    opacity: 0.7;
+}
+
+.topic-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+.perc {
+    margin-left: 6px;
+    opacity: 0.6;
+}
+
+.subtopics-list {
+    margin-top: var(--spacing-xl);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xl);
+    padding-left: var(--spacing-md);
+    border-left: 2px solid var(--color-border-light);
+}
+
+.subtopic-item {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.subtopic-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.subtopic-name {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    font-size: var(--font-size-sm);
+    font-weight: 700;
+    color: var(--color-text-secondary);
+}
+
+.mini-badge {
+    font-size: 10px;
+    font-weight: 900;
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+}
+
+.mini-badge.excellent {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.mini-badge.good {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.mini-badge.average {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.mini-badge.weak {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.mini-badge.struggling {
+    background: #fef2f2;
+    color: #991b1b;
+}
+
+/* ========= LEARNING OUTCOMES ========= */
+.lo-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    padding-left: var(--spacing-lg);
+}
+
+.lo-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.lo-desc {
+    font-size: 13px;
+    color: var(--color-text-tertiary);
+    line-height: 1.4;
+}
+
+.lo-bar-bg {
+    height: 4px;
+    background: var(--color-bg-tertiary);
+    border-radius: 2px;
+    overflow: hidden;
+    width: 60px;
+}
+
+.lo-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+}
+
+.lo-bar-fill.excellent {
+    background: #10b981;
+}
+
+.lo-bar-fill.good {
+    background: #3b82f6;
+}
+
+.lo-bar-fill.average {
+    background: #f59e0b;
+}
+
+.lo-bar-fill.weak {
+    background: #ef4444;
+}
+
+.lo-bar-fill.struggling {
+    background: #ef4444;
+}

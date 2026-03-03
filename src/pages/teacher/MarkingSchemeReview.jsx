@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
-import { ArrowLeft, Save, Plus, Trash2, CheckCircle, AlertCircle, HelpCircle, Sparkles, Loader, Printer } from 'lucide-react';
+import { SyllabusService } from '../../lib/syllabusService';
+import { ArrowLeft, Save, Plus, Trash2, CheckCircle, AlertCircle, HelpCircle, Sparkles, Loader, Printer, Link } from 'lucide-react';
 import './Page.css';
 import './MarkingSchemeReview.css';
 
@@ -58,9 +59,20 @@ export default function MarkingSchemeReview() {
         }
     }
 
-    const handleQuestionChange = (index, field, value) => {
+    const handleQuestionChange = async (index, field, value) => {
         const newQuestions = [...questions];
-        newQuestions[index] = { ...newQuestions[index], [field]: value };
+        const updatedQuestion = { ...newQuestions[index], [field]: value };
+
+        // Auto-resolve IDs if text fields change
+        if (field === 'topic') {
+            updatedQuestion.topic_id = await SyllabusService.resolveTopic(test.subject, test.grade, value);
+        } else if (field === 'subtopic' && updatedQuestion.topic_id) {
+            updatedQuestion.subtopic_id = await SyllabusService.resolveSubtopic(updatedQuestion.topic_id, value);
+        } else if (field === 'learning_outcome' && updatedQuestion.subtopic_id) {
+            updatedQuestion.learning_outcome_id = await SyllabusService.resolveLearningOutcome(updatedQuestion.subtopic_id, value);
+        }
+
+        newQuestions[index] = updatedQuestion;
         setQuestions(newQuestions);
     };
 
@@ -132,10 +144,23 @@ export default function MarkingSchemeReview() {
             const data = await response.json();
 
             if (data.questions) {
-                setQuestions(data.questions);
+                // Resolve all questions against the syllabus
+                const resolvedQuestions = await Promise.all(data.questions.map(async (q) => {
+                    const topicId = await SyllabusService.resolveTopic(test.subject, test.grade, q.topic);
+                    const subtopicId = topicId ? await SyllabusService.resolveSubtopic(topicId, q.subtopic) : null;
+                    const loId = subtopicId ? await SyllabusService.resolveLearningOutcome(subtopicId, q.learning_outcome) : null;
+
+                    return {
+                        ...q,
+                        topic_id: topicId,
+                        subtopic_id: subtopicId,
+                        learning_outcome_id: loId
+                    };
+                }));
+                setQuestions(resolvedQuestions);
             }
 
-            alert('Marking scheme generated from image successfully!');
+            alert('Marking scheme generated and linked to syllabus successfully!');
         } catch (err) {
             console.error('Error generating AI scheme:', err);
             setError(`AI Generation failed: ${err.message}`);
@@ -432,41 +457,61 @@ export default function MarkingSchemeReview() {
                                         />
                                     </div>
                                     <div className="field-group flex-grow">
-                                        <label>Learning Outcome</label>
-                                        <input
-                                            type="text"
-                                            value={q.learning_outcome || ''}
-                                            onChange={(e) => handleQuestionChange(index, 'learning_outcome', e.target.value)}
-                                            placeholder="e.g. Solving linear equations"
-                                            className="input input-sm"
-                                        />
+                                        <label style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                            Learning Outcome
+                                            {q.learning_outcome_id ? <Link size={12} className="text-success" /> : <Link size={12} className="text-muted" />}
+                                        </label>
+                                        <div className="input-with-resolve">
+                                            <input
+                                                type="text"
+                                                value={q.learning_outcome || ''}
+                                                onChange={(e) => handleQuestionChange(index, 'learning_outcome', e.target.value)}
+                                                placeholder="e.g. Solving linear equations"
+                                                className={`input input-sm ${q.learning_outcome_id ? 'linked-field' : ''}`}
+                                            />
+                                            {q.learning_outcome_id ? (
+                                                <div className="resolve-badge success">
+                                                    <Check size={12} />
+                                                    {q.learning_outcome_code || 'Linked'}
+                                                </div>
+                                            ) : (
+                                                <div className="resolve-badge warning">
+                                                    <AlertTriangle size={12} />
+                                                    Unlinked
+                                                </div>
+                                            )}
+                                        </div>
+                                        {q.learning_outcome_code && !q.learning_outcome_id && (
+                                            <p className="code-hint">Suggested Code: {q.learning_outcome_code}</p>
+                                        )}
+                                    </div>
+                                    <div className="question-fields">
+                                        <div className="field-group full-width">
+                                            <label>Explanation / Rationale</label>
+                                            <textarea
+                                                value={q.explanation || ''}
+                                                onChange={(e) => handleQuestionChange(index, 'explanation', e.target.value)}
+                                                placeholder="Explain why the answer is correct..."
+                                                className="input input-sm"
+                                                rows={2}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
-                                <div className="question-fields">
-                                    <div className="field-group full-width">
-                                        <label>Explanation / Rationale</label>
-                                        <textarea
-                                            value={q.explanation || ''}
-                                            onChange={(e) => handleQuestionChange(index, 'explanation', e.target.value)}
-                                            placeholder="Explain why the answer is correct..."
-                                            className="input input-sm"
-                                            rows={2}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-                        ))
+                                ))
                     )}
-                </div>
+                            </div>
 
-                {questions.length > 0 && (
-                    <button className="btn btn-secondary add-q-btn-large" onClick={addQuestion}>
-                        <Plus size={20} />
-                        Add Another Question
-                    </button>
-                )}
+                {
+                                questions.length > 0 && (
+                                    <button className="btn btn-secondary add-q-btn-large" onClick={addQuestion}>
+                                        <Plus size={20} />
+                                        Add Another Question
+                                    </button>
+                                )
+                            }
             </div>
-        </div>
-    );
+            </div>
+            );
 }
 

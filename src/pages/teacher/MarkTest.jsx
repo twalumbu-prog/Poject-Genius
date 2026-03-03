@@ -333,33 +333,46 @@ export default function MarkTest() {
             if (resError) throw resError;
 
 
-            // 4. Generate Topic Analysis
-            const topicPerformance = {};
+            // 4. Generate Granular Analysis (Topic, Subtopic, Learning Outcome)
+            const topicPerf = {};
+            const subtopicPerf = {};
+            const loPerf = {};
+
             markingScheme.questions.forEach(q => {
-                if (!topicPerformance[q.topic]) {
-                    topicPerformance[q.topic] = {
-                        correct: 0, total: 0,
-                        easy_correct: 0, easy_total: 0,
-                        average_correct: 0, average_total: 0,
-                        hard_correct: 0, hard_total: 0,
-                    };
-                }
-                const tp = topicPerformance[q.topic];
-                tp.total++;
-
                 const difficulty = q.difficulty || 'average';
-                tp[`${difficulty}_total`]++;
-
                 const studentAns = studentAnswers.find(a => a.question_number === q.question_number);
-                if (studentAns?.is_correct) {
-                    tp.correct++;
-                    tp[`${difficulty}_correct`]++;
-                }
+                const isCorrect = studentAns?.is_correct || false;
+
+                const updatePerf = (perfMap, key, id) => {
+                    if (!key) return;
+                    if (!perfMap[key]) {
+                        perfMap[key] = {
+                            id: id,
+                            correct: 0, total: 0,
+                            easy_correct: 0, easy_total: 0,
+                            average_correct: 0, average_total: 0,
+                            hard_correct: 0, hard_total: 0,
+                        };
+                    }
+                    const p = perfMap[key];
+                    p.total++;
+                    p[`${difficulty}_total`]++;
+                    if (isCorrect) {
+                        p.correct++;
+                        p[`${difficulty}_correct`]++;
+                    }
+                };
+
+                updatePerf(topicPerf, q.topic, q.topic_id);
+                updatePerf(subtopicPerf, q.subtopic, q.subtopic_id);
+                updatePerf(loPerf, q.learning_outcome, q.learning_outcome_id);
             });
 
-            const analysisEntries = Object.entries(topicPerformance).map(([topic, data]) => ({
+            // Prepare Bulk Inserts
+            const topicAnalysis = Object.entries(topicPerf).map(([name, data]) => ({
                 result_id: result.id,
-                topic,
+                topic: name,
+                topic_id: data.id,
                 total_questions: data.total,
                 correct_answers: data.correct,
                 percentage: (data.correct / data.total) * 100,
@@ -371,14 +384,50 @@ export default function MarkTest() {
                 hard_correct: data.hard_correct,
             }));
 
-            // Clean up old analysis for this result
-            await supabase.from('topic_analysis').delete().eq('result_id', result.id);
+            const subtopicAnalysis = Object.entries(subtopicPerf)
+                .filter(([_, data]) => data.id) // Only if linked to syllabus
+                .map(([_, data]) => ({
+                    result_id: result.id,
+                    subtopic_id: data.id,
+                    total_questions: data.total,
+                    correct_answers: data.correct,
+                    percentage: (data.correct / data.total) * 100,
+                    easy_total: data.easy_total,
+                    easy_correct: data.easy_correct,
+                    average_total: data.average_total,
+                    average_correct: data.average_correct,
+                    hard_total: data.hard_total,
+                    hard_correct: data.hard_correct,
+                }));
 
-            const { error: analysisError } = await supabase
-                .from('topic_analysis')
-                .insert(analysisEntries);
+            const loAnalysis = Object.entries(loPerf)
+                .filter(([_, data]) => data.id) // Only if linked to syllabus
+                .map(([_, data]) => ({
+                    result_id: result.id,
+                    learning_outcome_id: data.id,
+                    total_questions: data.total,
+                    correct_answers: data.correct,
+                    percentage: (data.correct / data.total) * 100,
+                    easy_total: data.easy_total,
+                    easy_correct: data.easy_correct,
+                    average_total: data.average_total,
+                    average_correct: data.average_correct,
+                    hard_total: data.hard_total,
+                    hard_correct: data.hard_correct,
+                }));
 
-            if (analysisError) throw analysisError;
+            // Save Analysis in Parallel
+            await Promise.all([
+                supabase.from('topic_analysis').delete().eq('result_id', result.id).then(() =>
+                    topicAnalysis.length > 0 ? supabase.from('topic_analysis').insert(topicAnalysis) : null
+                ),
+                supabase.from('subtopic_analysis').delete().eq('result_id', result.id).then(() =>
+                    subtopicAnalysis.length > 0 ? supabase.from('subtopic_analysis').insert(subtopicAnalysis) : null
+                ),
+                supabase.from('learning_outcome_analysis').delete().eq('result_id', result.id).then(() =>
+                    loAnalysis.length > 0 ? supabase.from('learning_outcome_analysis').insert(loAnalysis) : null
+                )
+            ]);
 
             // 5. Success - Move to next or show final results
             const updatedBatchResults = [...batchResults, { ...reviewData, score, percentage }];

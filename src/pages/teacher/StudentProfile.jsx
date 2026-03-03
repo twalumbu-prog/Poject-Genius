@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
-import { ArrowLeft, ChevronDown, ChevronRight, ChevronUp, FileText } from 'lucide-react';
+import { SyllabusService } from '../../lib/syllabusService';
+import { ArrowLeft, ChevronDown, ChevronRight, ChevronUp, FileText, Target, BookOpen, Layers } from 'lucide-react';
 import { SYLLABUS_DATA } from '../../data/ecz_syllabus';
 import PerformanceGraph from '../../components/teacher/PerformanceGraph';
 import ReportCardModal from '../../components/teacher/ReportCardModal';
@@ -44,102 +45,90 @@ export default function StudentProfile() {
 
     async function fetchData() {
         try {
-            // Fetch pupil info
+            // 1. Fetch pupil info
             const { data: pupilData, error: pupilError } = await supabase
                 .from('pupils')
                 .select('*')
                 .eq('id', pupilId)
                 .single();
             if (pupilError) throw pupilError;
-
-            // Initialize grouped data from syllabus if grade is known
-            const grouped = {};
-            const syllabusSubjects = [];
-
-            if (pupilData.grade) {
-                Object.entries(SYLLABUS_DATA).forEach(([subject, grades]) => {
-                    const gradeTopics = grades[pupilData.grade];
-                    if (gradeTopics) {
-                        syllabusSubjects.push(subject);
-                        grouped[subject] = {};
-                        gradeTopics.forEach(topic => {
-                            grouped[subject][topic.name] = [];
-                        });
-                    }
-                });
-            }
-
-            // Fetch all results for this pupil, joining test info
-            const { data: resultsData, error: resultsError } = await supabase
-                .from('results')
-                .select(`
-                    id,
-                    test_id,
-                    score,
-                    percentage,
-                    created_at,
-                    tests (
-                        id,
-                        subject,
-                        title
-                    )
-                `)
-                .eq('pupil_id', pupilId)
-                .order('created_at', { ascending: true });
-            if (resultsError) throw resultsError;
-
-            // Fetch all topic_analysis for all of these results
-            const resultIds = (resultsData || []).map(r => r.id);
-            let topicRows = [];
-            if (resultIds.length > 0) {
-                const { data: topicData, error: topicError } = await supabase
-                    .from('topic_analysis')
-                    .select('*')
-                    .in('result_id', resultIds)
-                    .order('created_at', { ascending: true });
-                if (topicError) throw topicError;
-                topicRows = topicData || [];
-            }
-
-            // Build a map: result_id -> result (with test info)
-            const resultMap = {};
-            (resultsData || []).forEach(r => {
-                resultMap[r.id] = r;
-            });
-
-            // Group by subject -> topic -> [{ percentage, date, testTitle }]
-            topicRows.forEach(ta => {
-                const result = resultMap[ta.result_id];
-                if (!result || !result.tests) return;
-                const subject = result.tests.subject;
-                const topic = ta.topic;
-
-                // Ensure subject and topic exist (even if not in current grade syllabus)
-                if (!grouped[subject]) grouped[subject] = {};
-                if (!grouped[subject][topic]) grouped[subject][topic] = [];
-
-                grouped[subject][topic].push({
-                    percentage: Number(ta.percentage),
-                    date: result.created_at,
-                    testTitle: result.tests.title,
-                    totalQuestions: ta.total_questions,
-                    correctAnswers: ta.correct_answers,
-                    easy_total: ta.easy_total,
-                    easy_correct: ta.easy_correct,
-                    average_total: ta.average_total,
-                    average_correct: ta.average_correct,
-                    hard_total: ta.hard_total,
-                    hard_correct: ta.hard_correct,
-                });
-            });
-
-            // Get final subject list (Syllabus subjects first, then others)
-            const allSubjects = Array.from(new Set([...syllabusSubjects, ...Object.keys(grouped)])).sort();
-
             setPupil(pupilData);
-            setSubjectData(grouped);
+
+            if (!pupilData.grade) {
+                setLoading(false);
+                return;
+            }
+
+            // 2. Fetch Structured Syllabus for this grade
+            const hierarchy = await SyllabusService.getSyllabusForGrade(pupilData.grade);
+
+            // 3. Fetch all results for this pupil
+            const { data: resultsData } = await supabase
+                .from('results')
+                .select('id, test_id, created_at, tests(subject, title)')
+                .eq('pupil_id', pupilId);
+
+            const resultIds = (resultsData || []).map(r => r.id);
+            if (resultIds.length === 0) {
+                setSubjectData({});
+                setSubjects(Object.keys(hierarchy));
+                setActiveSubject(Object.keys(hierarchy)[0] || null);
+                setLoading(false);
+                return;
+            }
+
+            // 4. Fetch all analysis levels
+            const [topicData, subtopicData, loData] = await Promise.all([
+                supabase.from('topic_analysis').select('*').in('result_id', resultIds),
+                supabase.from('subtopic_analysis').select('*').in('result_id', resultIds),
+                supabase.from('learning_outcome_analysis').select('*').in('result_id', resultIds)
+            ]);
+
+            // 5. Map Analysis to Hierarchy
+            const enrichedHierarchy = JSON.parse(JSON.stringify(hierarchy)); // Deep clone
+
+            Object.keys(enrichedHierarchy).forEach(subject => {
+                Object.keys(enrichedHierarchy[subject]).forEach(term => {
+                    enrichedHierarchy[subject][term].forEach(topic => {
+                        // Attach topic stats
+                        topic.attempts = (topicData.data || [])
+                            .filter(ta => ta.topic_id === topic.id)
+                            .map(ta => ({
+                                percentage: Number(ta.percentage),
+                                date: ta.created_at,
+                                testTitle: resultsData.find(r => r.id === ta.result_id)?.tests?.title
+                            }));
+
+                        topic.subtopics.forEach(sub => {
+                            // Attach subtopic stats
+                            sub.attempts = (subtopicData.data || [])
+                                .filter(sta => sta.subtopic_id === sub.id)
+                                .map(sta => ({
+                                    percentage: Number(sta.percentage),
+                                    date: sta.created_at,
+                                    testTitle: resultsData.find(r => r.id === sta.result_id)?.tests?.title
+                                }));
+
+                            sub.learningOutcomes.forEach(lo => {
+                                // Attach LO stats
+                                lo.attempts = (loData.data || [])
+                                    .filter(loa => loa.learning_outcome_id === lo.id)
+                                    .map(loa => ({
+                                        percentage: Number(loa.percentage),
+                                        date: loa.created_at,
+                                        testTitle: resultsData.find(r => r.id === loa.result_id)?.tests?.title
+                                    }));
+                            });
+                        });
+                    });
+                });
+            });
+
+            setSubjectData(enrichedHierarchy);
+            const allSubjects = Object.keys(enrichedHierarchy).sort();
             setSubjects(allSubjects);
             setActiveSubject(allSubjects[0] || null);
+
         } catch (error) {
             console.error('Error fetching student profile:', error);
         } finally {
@@ -160,13 +149,8 @@ export default function StudentProfile() {
         return <div className="loading-container">Student not found</div>;
     }
 
-    const currentTopics = activeSubject ? subjectData[activeSubject] || {} : {};
-    const topicEntries = Object.entries(currentTopics).sort((a, b) => {
-        // Sort by average percentage descending
-        const avgA = a[1].reduce((s, v) => s + v.percentage, 0) / a[1].length;
-        const avgB = b[1].reduce((s, v) => s + v.percentage, 0) / b[1].length;
-        return avgB - avgA;
-    });
+    const currentSubjectData = activeSubject ? subjectData[activeSubject] || {} : {};
+    const termEntries = Object.entries(currentSubjectData).sort();
 
     const handleGenerateReport = (config) => {
         setShowReportModal(false);
@@ -282,37 +266,99 @@ export default function StudentProfile() {
                 </div>
             )}
 
-            <div className="topics-accordion">
-                {topicEntries.map(([topicName, attempts]) => {
-                    const hasAttempts = attempts && attempts.length > 0;
-                    const avg = hasAttempts
-                        ? Math.round(attempts.reduce((s, a) => s + a.percentage, 0) / attempts.length)
-                        : 0;
-                    const status = hasAttempts ? getTopicStatus(avg) : 'unattempted';
-                    const config = STATUS_CONFIG[status];
-                    const isOpen = expandedTopic === topicName && hasAttempts;
-
-                    return (
-                        <div key={topicName} className={`topic-accordion-card ${isOpen ? 'open' : ''} ${!hasAttempts ? 'unattempted' : ''}`}>
-                            <button
-                                className="topic-accordion-header"
-                                onClick={() => hasAttempts && setExpandedTopic(isOpen ? null : topicName)}
-                                style={{ cursor: hasAttempts ? 'pointer' : 'default' }}
-                            >
-                                <span className="topic-accordion-name">{topicName}</span>
-                                <span className={`topic-status-badge ${config.className}`}>
-                                    {config.label}
-                                </span>
-                                {hasAttempts && (isOpen ? <ChevronUp size={20} /> : <ChevronRight size={20} />)}
-                            </button>
-                            {isOpen && hasAttempts && (
-                                <div className="topic-accordion-body">
-                                    <PerformanceGraph attempts={attempts} />
-                                </div>
-                            )}
+            <div className="syllabus-hierarchy">
+                {termEntries.map(([termName, topics]) => (
+                    <div key={termName} className="term-section">
+                        <div className="term-header">
+                            <Layers size={20} />
+                            <h3>{termName}</h3>
                         </div>
-                    );
-                })}
+                        <div className="topics-accordion">
+                            {topics.map(topic => {
+                                const hasAttempts = topic.attempts && topic.attempts.length > 0;
+                                const avg = hasAttempts
+                                    ? Math.round(topic.attempts.reduce((s, a) => s + a.percentage, 0) / topic.attempts.length)
+                                    : 0;
+                                const status = hasAttempts ? getTopicStatus(avg) : 'unattempted';
+                                const config = STATUS_CONFIG[status];
+                                const isTopicOpen = expandedTopic === topic.id;
+
+                                return (
+                                    <div key={topic.id} className={`topic-accordion-card ${isTopicOpen ? 'open' : ''} ${!hasAttempts ? 'unattempted' : ''}`}>
+                                        <button
+                                            className="topic-accordion-header"
+                                            onClick={() => setExpandedTopic(isTopicOpen ? null : topic.id)}
+                                        >
+                                            <div className="topic-info">
+                                                <BookOpen size={18} className="topic-icon" />
+                                                <span className="topic-accordion-name">{topic.name}</span>
+                                            </div>
+                                            <div className="topic-meta">
+                                                <span className={`topic-status-badge ${config.className}`}>
+                                                    {config.label}
+                                                    {hasAttempts && <span className="perc">{avg}%</span>}
+                                                </span>
+                                                {isTopicOpen ? <ChevronUp size={20} /> : <ChevronRight size={20} />}
+                                            </div>
+                                        </button>
+
+                                        {isTopicOpen && (
+                                            <div className="topic-accordion-body">
+                                                {hasAttempts && <PerformanceGraph attempts={topic.attempts} />}
+
+                                                <div className="subtopics-list">
+                                                    {topic.subtopics.map(sub => {
+                                                        const subAvg = sub.attempts?.length
+                                                            ? Math.round(sub.attempts.reduce((s, a) => s + a.percentage, 0) / sub.attempts.length)
+                                                            : null;
+
+                                                        return (
+                                                            <div key={sub.id} className="subtopic-item">
+                                                                <div className="subtopic-row">
+                                                                    <div className="subtopic-name">
+                                                                        <Target size={14} />
+                                                                        <span>{sub.name}</span>
+                                                                    </div>
+                                                                    {subAvg !== null && (
+                                                                        <span className={`mini-badge ${getTopicStatus(subAvg)}`}>
+                                                                            {subAvg}%
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+
+                                                                <div className="lo-list">
+                                                                    {sub.learningOutcomes.map(lo => {
+                                                                        const loAvg = lo.attempts?.length
+                                                                            ? Math.round(lo.attempts.reduce((s, a) => s + a.percentage, 0) / lo.attempts.length)
+                                                                            : null;
+
+                                                                        return (
+                                                                            <div key={lo.id} className="lo-item">
+                                                                                <p className="lo-desc">{lo.description}</p>
+                                                                                {loAvg !== null && (
+                                                                                    <div className="lo-bar-bg">
+                                                                                        <div
+                                                                                            className={`lo-bar-fill ${getTopicStatus(loAvg)}`}
+                                                                                            style={{ width: `${loAvg}%` }}
+                                                                                        />
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                ))}
             </div>
 
             <ReportCardModal

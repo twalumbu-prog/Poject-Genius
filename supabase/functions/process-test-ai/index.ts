@@ -322,6 +322,9 @@ Response Schema:
       "correct_answer": "A",
       "marks": number,
       "topic": "string",
+      "subtopic": "string",
+      "learning_outcome": "string",
+      "learning_outcome_code": "string (The official syllabus code if known, e.g. E2.1.1)",
       "cognitive_level": "Knowledge|Application|Analysis",
       "difficulty_score": 1-10,
       "explanation": "string"
@@ -341,7 +344,8 @@ Ensure:
 1. Questions are age-appropriate and technically accurate.
 2. Distractors are plausible but clearly incorrect.
 3. Bloom's Taxonomy levels match the target difficulty.
-4. Explanations provided are clear and helpful for teachers.`,
+4. Explanations provided are clear and helpful for teachers.
+5. Provide specific 'subtopic', 'learning_outcome', AND its 'learning_outcome_code' (e.g., GS.LO1, E2.1.1) aligned with the official Zambian ECZ syllabus.`,
         },
       ];
     } else if (mode === "generate_key") {
@@ -352,19 +356,27 @@ Ensure:
       messages = [
         {
           role: "system",
-          content: `You are an expert OCR and curriculum analyzer. Extract text accurately from the provided test paper image.
+          content: `You are an expert OCR and curriculum analyzer specializing in the Zambian (ECZ) syllabus. 
+Extract questions accurately from the provided test paper image.
 Always respond with strictly valid JSON.
+
+SYLLABUS MAPPING GUIDANCE:
+- "topic": Usually the 'Component' (e.g. 2.1 Listening and Speaking, 4.2 Fractions)
+- "subtopic": Usually the 'Topic' (e.g. Greetings, Addition of Fractions)
+- "learning_outcome": Usually the 'Specific Outcome' (e.g. demonstrate different types of greetings)
+
 Response Schema:
 {
   "questions": [
     {
       "question_number": number,
       "question_text": "string (the full text of the question)",
-      "options": ["string", "string", "string", "string"] (extract all visible multiple choice options),
-      "correct_answer": "string (A, B, C, or D if indicated, or empty string)",
-      "topic": "string (Infer the mathematical topic)",
+      "options": ["string", "string", "string", "string"],
+      "correct_answer": "string (A, B, C, or D)",
+      "topic": "string",
       "subtopic": "string",
-      "learning_outcome": "string"
+      "learning_outcome": "string",
+      "learning_outcome_code": "string (The official syllabus code if visible, otherwise infer based on pattern like E2.1.1)"
     }
   ],
   "topic_summary": {
@@ -377,7 +389,7 @@ Response Schema:
           content: [
             {
               type: "text",
-              text: 'Analyze this test paper image. Extract all questions, options, and correct answers (if marked) according to the strict JSON schema provided.',
+              text: 'Analyze this test paper image according to the strict ECZ syllabus hierarchy. Extract all questions, options, and infer the component (topic), topic (subtopic), specific outcome (learning_outcome), and its official syllabus code (learning_outcome_code).',
             },
             ...buildImageParts(),
           ],
