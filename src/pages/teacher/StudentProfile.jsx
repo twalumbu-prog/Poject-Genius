@@ -347,7 +347,7 @@ export default function StudentProfile() {
                 {termEntries.map(([termName, topics]) => (
                     <div key={termName} className="term-section">
                         <div className="term-header">
-                            <Layers size={20} />
+                            <Layers size={16} />
                             <h3>{termName}</h3>
                         </div>
                         <div className="topics-accordion">
