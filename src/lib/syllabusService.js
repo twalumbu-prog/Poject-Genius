@@ -6,9 +6,22 @@ import { supabase } from './supabase';
  */
 export const SyllabusService = {
     /**
+     * Normalize grade string (e.g., "7A" -> "Grade 7", "7" -> "Grade 7")
+     */
+    normalizeGrade(grade) {
+        if (!grade) return null;
+        const match = grade.match(/(\d+)/);
+        if (match) {
+            return `Grade ${match[1]}`;
+        }
+        return grade;
+    },
+
+    /**
      * Fetch the full structured syllabus for a specific grade
      */
-    async getSyllabusForGrade(grade) {
+    async getSyllabusForGrade(rawGrade) {
+        const grade = this.normalizeGrade(rawGrade);
         // 1. Fetch all subjects first (to ensure they always show up)
         const { data: allSubjects, error: subjectsError } = await supabase
             .from('subjects')
