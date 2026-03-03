@@ -35,6 +35,7 @@ export default function StudentProfile() {
     const [expandedTopic, setExpandedTopic] = useState(null);
     const [showMoreSubjects, setShowMoreSubjects] = useState(false);
     const [showReportModal, setShowReportModal] = useState(false);
+    const [isSubjectOverviewOpen, setIsSubjectOverviewOpen] = useState(true);
     const [loading, setLoading] = useState(true);
 
     const VISIBLE_TABS = 3;
@@ -96,7 +97,14 @@ export default function StudentProfile() {
                             .map(ta => ({
                                 percentage: Number(ta.percentage),
                                 date: ta.created_at,
-                                testTitle: resultsData.find(r => r.id === ta.result_id)?.tests?.title
+                                testTitle: resultsData.find(r => r.id === ta.result_id)?.tests?.title,
+                                easy_total: ta.easy_total || 0,
+                                easy_correct: ta.easy_correct || 0,
+                                average_total: ta.average_total || 0,
+                                average_correct: ta.average_correct || 0,
+                                hard_total: ta.hard_total || 0,
+                                hard_correct: ta.hard_correct || 0,
+                                totalQuestions: (ta.easy_total || 0) + (ta.average_total || 0) + (ta.hard_total || 0)
                             }));
 
                         topic.subtopics.forEach(sub => {
@@ -106,7 +114,14 @@ export default function StudentProfile() {
                                 .map(sta => ({
                                     percentage: Number(sta.percentage),
                                     date: sta.created_at,
-                                    testTitle: resultsData.find(r => r.id === sta.result_id)?.tests?.title
+                                    testTitle: resultsData.find(r => r.id === sta.result_id)?.tests?.title,
+                                    easy_total: sta.easy_total || 0,
+                                    easy_correct: sta.easy_correct || 0,
+                                    average_total: sta.average_total || 0,
+                                    average_correct: sta.average_correct || 0,
+                                    hard_total: sta.hard_total || 0,
+                                    hard_correct: sta.hard_correct || 0,
+                                    totalQuestions: (sta.easy_total || 0) + (sta.average_total || 0) + (sta.hard_total || 0)
                                 }));
 
                             sub.learningOutcomes.forEach(lo => {
@@ -116,7 +131,14 @@ export default function StudentProfile() {
                                     .map(loa => ({
                                         percentage: Number(loa.percentage),
                                         date: loa.created_at,
-                                        testTitle: resultsData.find(r => r.id === loa.result_id)?.tests?.title
+                                        testTitle: resultsData.find(r => r.id === loa.result_id)?.tests?.title,
+                                        easy_total: loa.easy_total || 0,
+                                        easy_correct: loa.easy_correct || 0,
+                                        average_total: loa.average_total || 0,
+                                        average_correct: loa.average_correct || 0,
+                                        hard_total: loa.hard_total || 0,
+                                        hard_correct: loa.hard_correct || 0,
+                                        totalQuestions: (loa.easy_total || 0) + (loa.average_total || 0) + (loa.hard_total || 0)
                                     }));
                             });
                         });
@@ -273,61 +295,76 @@ export default function StudentProfile() {
             )}
 
             {activeSubject && termEntries.length > 0 && (
-                <div className="subject-overview-card">
-                    <div className="overview-header">
-                        <div className="overview-stat">
-                            <span className="overview-label">Subject Mastery</span>
-                            <span className="overview-value">
-                                {(() => {
-                                    let total = 0;
-                                    let count = 0;
-                                    Object.values(currentSubjectData).forEach(topics => {
-                                        topics.forEach(t => {
-                                            if (t.attempts?.length > 0) {
-                                                total += t.attempts.reduce((s, a) => s + a.percentage, 0) / t.attempts.length;
-                                                count++;
-                                            }
+                <div className={`subject-overview-card ${isSubjectOverviewOpen ? 'open' : ''}`}>
+                    <button
+                        className="overview-toggle-header"
+                        onClick={() => setIsSubjectOverviewOpen(!isSubjectOverviewOpen)}
+                    >
+                        <div className="overview-header-content">
+                            <div className="overview-main-stat">
+                                <span className="overview-label">Subject Mastery</span>
+                                <span className="overview-value mastery">
+                                    {(() => {
+                                        let total = 0;
+                                        let count = 0;
+                                        Object.values(currentSubjectData).forEach(topics => {
+                                            topics.forEach(t => {
+                                                if (t.attempts?.length > 0) {
+                                                    total += t.attempts.reduce((s, a) => s + a.percentage, 0) / t.attempts.length;
+                                                    count++;
+                                                }
+                                            });
                                         });
-                                    });
-                                    return count > 0 ? `${Math.round(total / count)}%` : '0%';
-                                })()}
-                            </span>
-                        </div>
-                        <div className="overview-stat">
-                            <span className="overview-label">Progress</span>
-                            <span className="overview-value">
-                                {(() => {
-                                    let attempted = 0;
-                                    let total = 0;
-                                    Object.values(currentSubjectData).forEach(topics => {
-                                        topics.forEach(t => {
-                                            total++;
-                                            if (t.attempts?.length > 0) attempted++;
-                                        });
-                                    });
-                                    return `${attempted}/${total} Topics`;
-                                })()}
-                            </span>
-                        </div>
-                    </div>
-                    {/* Overall Subject Graph */}
-                    {(() => {
-                        const allAttempts = [];
-                        Object.values(currentSubjectData).forEach(topics => {
-                            topics.forEach(t => {
-                                if (t.attempts) allAttempts.push(...t.attempts);
-                            });
-                        });
-                        return allAttempts.length > 0 ? (
-                            <div className="overview-chart">
-                                <PerformanceGraph attempts={allAttempts.sort((a, b) => new Date(a.date) - new Date(b.date))} />
+                                        return count > 0 ? `${Math.round(total / count)}%` : '0%';
+                                    })()}
+                                </span>
                             </div>
-                        ) : (
-                            <div className="overview-empty">
-                                <p>Perform assessments to see progress trends here.</p>
+                            <div className="overview-sub-stats">
+                                <div className="overview-stat">
+                                    <span className="overview-label">Progress</span>
+                                    <span className="overview-value sm">
+                                        {(() => {
+                                            let attempted = 0;
+                                            let total = 0;
+                                            Object.values(currentSubjectData).forEach(topics => {
+                                                topics.forEach(t => {
+                                                    total++;
+                                                    if (t.attempts?.length > 0) attempted++;
+                                                });
+                                            });
+                                            return `${attempted}/${total} Topics`;
+                                        })()}
+                                    </span>
+                                </div>
                             </div>
-                        );
-                    })()}
+                        </div>
+                        <div className="overview-chevron">
+                            {isSubjectOverviewOpen ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
+                        </div>
+                    </button>
+
+                    {isSubjectOverviewOpen && (
+                        <div className="overview-body">
+                            {/* Overall Subject Graph */}
+                            {(() => {
+                                const allAttempts = [];
+                                Object.values(currentSubjectData).forEach(topics => {
+                                    topics.forEach(t => {
+                                        if (t.attempts) allAttempts.push(...t.attempts);
+                                    });
+                                });
+                                return allAttempts.length > 0 ? (
+                                    <div className="overview-chart-wrapper">
+                                        <PerformanceGraph attempts={allAttempts.sort((a, b) => new Date(a.date) - new Date(b.date))} />
+                                    </div>
+                                ) : (
+                                    <div className="overview-empty">
+                                        <p>Perform assessments to see progress trends here.</p>
+                                    </div>
+                                );
+                            })()}
+                        </div>
+                    )}
                 </div>
             )}
 
