@@ -56,6 +56,8 @@ export const SyllabusService = {
 
         if (topics.length === 0) return hierarchy;
 
+        // 2. Fetch all subtopics for these topics
+        const topicIds = topics.map(t => t.id);
         const { data: subtopics, error: subError } = await supabase
             .from('subtopics')
             .select('*')
