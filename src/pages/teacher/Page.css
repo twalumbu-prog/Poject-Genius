@@ -1344,79 +1344,72 @@ video {
     animation: textCycle 3s ease-in-out infinite;
 }
 
-/* Horizontal progress track */
-.scan-progress-track {
-    display: flex;
-    align-items: flex-start;
-    gap: 0;
+/* ── FILL PROGRESS BAR ──────────────────────────────────────────── */
+.scan-bar-wrap {
+    width: 100%;
+    height: 10px;
+    background: var(--color-bg-primary);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-bottom: 8px;
     position: relative;
+    border: 1.5px solid var(--color-border-light);
 }
 
-.scan-step-segment {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
+.scan-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--color-accent-primary), #7C3AED);
+    /* S-curve timing: fast start, ease through middle, slows at end */
+    transition: width 1.2s cubic-bezier(0.37, 0, 0.63, 1);
     position: relative;
+    overflow: hidden;
 }
 
-/* Connecting line between dots */
-.scan-step-segment:not(:last-child)::after {
+/* Shimmer sweep across the fill */
+.scan-bar-fill::after {
     content: '';
     position: absolute;
-    top: 6px;
-    left: 50%;
-    right: -50%;
-    height: 2px;
-    background: var(--color-border-light);
-    z-index: 0;
-    transition: background 400ms ease;
+    top: 0;
+    left: -60%;
+    width: 60%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+    animation: barShimmer 1.8s ease-in-out infinite;
 }
 
-.scan-step-segment.done:not(:last-child)::after,
-.scan-step-segment.active:not(:last-child)::after {
-    background: var(--color-accent-primary);
+@keyframes barShimmer {
+    0% {
+        left: -60%;
+    }
+
+    100% {
+        left: 110%;
+    }
 }
 
-.scan-step-dot {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    border: 2px solid var(--color-border);
-    background: white;
-    flex-shrink: 0;
-    position: relative;
-    z-index: 1;
-    transition: all 300ms ease;
+.scan-bar-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 2px;
 }
 
-.scan-step-segment.done .scan-step-dot {
-    background: var(--color-accent-primary);
-    border-color: var(--color-accent-primary);
-}
-
-.scan-step-segment.active .scan-step-dot {
-    background: white;
-    border-color: var(--color-accent-primary);
-    border-width: 3px;
-    box-shadow: 0 0 0 4px rgba(28, 176, 246, 0.2);
-}
-
-.scan-step-name {
-    font-size: 10px;
+.scan-bar-stage {
+    font-size: 11px;
     font-weight: 800;
-    color: var(--color-text-tertiary);
-    text-align: center;
-    line-height: 1.2;
-    transition: color 300ms ease;
-    word-break: break-word;
+    color: var(--color-accent-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
 }
 
-.scan-step-segment.done .scan-step-name,
-.scan-step-segment.active .scan-step-name {
-    color: var(--color-accent-secondary);
+.scan-bar-pct {
+    font-size: 11px;
+    font-weight: 900;
+    color: var(--color-text-tertiary);
+    font-variant-numeric: tabular-nums;
 }
+
 
 /* ── SCAN COMPLETE CARD ─────────────────────────────────────────── */
 .scan-complete-card {

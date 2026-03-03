@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { ArrowLeft, Camera, Upload, CheckCircle, AlertCircle, Sparkles, ChevronDown, ChevronUp, X, FileCheck } from 'lucide-react';
@@ -29,10 +29,12 @@ export default function MarkTest() {
     const [duplicatePrompt, setDuplicatePrompt] = useState(null);
     const [capturedImages, setCapturedImages] = useState([]);
     const [batchImages, setBatchImages] = useState([]); // All base64 images in current upload/capture
-    const [scanPhase, setScanPhase] = useState(0);
+    const [scanPhase, setScanPhase] = useState(0); // 0-4 message index
+    const [scanProgress, setScanProgress] = useState(0); // 0-100 fill bar
     const [scanMode, setScanMode] = useState('upload'); // 'upload' | 'camera'
     const [scanScriptCount, setScanScriptCount] = useState(0);
-    const [scanComplete, setScanComplete] = useState(null); // null | { success: true, count, warnings } | { success: false, ... }
+    const [scanComplete, setScanComplete] = useState(null);
+    const scanTimers = React.useRef([]); // all pending setTimeout ids
 
     const SCAN_STEPS_UPLOAD = [
         { label: 'Preparing files', detail: 'Reading and converting your documents...' },
@@ -49,6 +51,58 @@ export default function MarkTest() {
         { label: 'Finalising', detail: 'Preparing results for review...' },
     ];
     const currentSteps = scanMode === 'camera' ? SCAN_STEPS_CAMERA : SCAN_STEPS_UPLOAD;
+
+    // ── Progress scheduling ────────────────────────────────────────────
+    // Drives the fill bar through checkpoints, deliberately stalling ~92%.
+    // Only completeScan() advances it to 100% when the API actually returns.
+    const clearScanTimers = () => {
+        scanTimers.current.forEach(id => clearTimeout(id));
+        scanTimers.current = [];
+    };
+
+    const startScanProgress = () => {
+        clearScanTimers();
+        setScanProgress(0);
+        setScanPhase(0);
+        // Checkpoints: [delay_ms, progress_pct, phase_index]
+        // S-curve feel: fast start, steady middle, heavy stall near end
+        const schedule = [
+            [400, 12, 0],
+            [1200, 28, 1],
+            [2800, 47, 2],
+            [5000, 63, 2],
+            [7500, 75, 3],
+            [10500, 84, 3],
+            [14000, 89, 4],
+            [18000, 92, 4],
+            [23000, 93, 4], // stall — waits for API
+        ];
+        schedule.forEach(([delay, pct, phase]) => {
+            const id = setTimeout(() => {
+                setScanProgress(pct);
+                setScanPhase(phase);
+            }, delay);
+            scanTimers.current.push(id);
+        });
+    };
+
+    // Called when the API returns successfully
+    const completeScan = (batchPayload) => {
+        clearScanTimers();
+        setScanProgress(100);
+        // Short delay so the bar visually completes before the card swaps
+        const id = setTimeout(() => {
+            setIsProcessing(false);
+            const lowConfCount = batchPayload.reduce(
+                (acc, s) => acc + s.studentAnswers.filter(a => a.confidence === 'Low' || !a.student_answer).length, 0
+            );
+            setScanComplete({ success: true, count: batchPayload.length, warnings: lowConfCount, batch: batchPayload });
+        }, 500);
+        scanTimers.current.push(id);
+    };
+
+    // Cleanup on unmount
+    React.useEffect(() => () => clearScanTimers(), []);
 
     const base64ToBlob = (base64) => {
         const byteString = atob(base64.split(',')[1]);
@@ -68,18 +122,7 @@ export default function MarkTest() {
         fetchPupils();
     }, [testId]);
 
-    // Advance scan phase every 3s while processing
-    useEffect(() => {
-        let interval;
-        if (isProcessing) {
-            interval = setInterval(() => {
-                setScanPhase(prev => Math.min(prev + 1, currentSteps.length - 1));
-            }, 3000);
-        } else {
-            setScanPhase(0);
-        }
-        return () => clearInterval(interval);
-    }, [isProcessing, currentSteps.length]);
+
 
     async function fetchPupils() {
         try {
@@ -131,8 +174,8 @@ export default function MarkTest() {
             setScanComplete(null);
             setScanMode('upload');
             setScanScriptCount(files.length);
-            setScanPhase(0);
             setProcessingStatus('Processing uploaded files...');
+            startScanProgress();
 
             const processedFiles = await Promise.all(files.map(async file => {
                 // Convert to base64
@@ -201,22 +244,16 @@ export default function MarkTest() {
                 })
             }));
 
-            // Store all processed images/docs for this batch
+            // Store images then drive bar to 100% via completeScan
             setBatchImages(processedFiles);
             setScannedImage(processedFiles[0]);
-            // Show success beat before entering review
-            const lowConfCount = parsedBatch.reduce((acc, s) => acc + s.studentAnswers.filter(a => a.confidence === 'Low' || !a.student_answer).length, 0);
-            setScanComplete({
-                success: true,
-                count: parsedBatch.length,
-                warnings: lowConfCount,
-                batch: parsedBatch,
-            });
             setCurrentReviewIndex(0);
             setBatchResults([]);
             setResults(null);
+            completeScan(parsedBatch); // drives bar to 100%, then shows success card
         } catch (error) {
             console.error('AI Processing Error:', error);
+            clearScanTimers();
             const rawMessage = error?.message || (typeof error === 'string' ? error : "Unknown error occurred.");
 
             // Format lay-friendly explanation based on common error patterns
@@ -234,11 +271,11 @@ export default function MarkTest() {
                 message: friendlyMessage,
                 technicalDetails: rawMessage
             });
-        } finally {
             setIsProcessing(false);
             setProcessingStatus('');
         }
     };
+
 
     const handleSaveResult = async (forceOverwrite = false) => {
         if (!reviewData) return;
@@ -654,9 +691,9 @@ export default function MarkTest() {
                                             try {
                                                 setScanMode('camera');
                                                 setScanScriptCount(capturedImages.length);
-                                                setScanPhase(0);
                                                 setScanComplete(null);
                                                 setIsProcessing(true);
+                                                startScanProgress();
 
                                                 // 1. Apply document scan filter to all captured images sequentially
                                                 setProcessingStatus(`Enhancing ${capturedImages.length} images...`);
@@ -706,25 +743,19 @@ export default function MarkTest() {
                                                     })
                                                 }));
 
-                                                // Store filtered images for batch mapping
+                                                // Store filtered images then drive bar to 100%
                                                 setBatchImages(filteredImages);
                                                 setScannedImage(filteredImages[0]);
-                                                const lowConf = parsedBatch.reduce((acc, s) => acc + s.studentAnswers.filter(a => a.confidence === 'Low' || !a.student_answer).length, 0);
-                                                setScanComplete({
-                                                    success: true,
-                                                    count: parsedBatch.length,
-                                                    warnings: lowConf,
-                                                    batch: parsedBatch,
-                                                });
                                                 setCurrentReviewIndex(0);
                                                 setBatchResults([]);
                                                 setResults(null);
                                                 setCapturedImages([]);
+                                                completeScan(parsedBatch);
                                             } catch (error) {
                                                 console.error('Scan Error:', error);
-                                                const errorMessage = error?.message || (typeof error === 'string' ? error : "Unknown error occurred.");
-                                                alert(`Scan failed: ${errorMessage}`);
-                                            } finally {
+                                                clearScanTimers();
+                                                const rawMessage = error?.message || (typeof error === 'string' ? error : "Unknown error occurred.");
+                                                setProcessingError({ title: "Scan Failed", message: "The camera scan could not be processed. Please ensure the images are clear and try again.", technicalDetails: rawMessage });
                                                 setIsProcessing(false);
                                                 setProcessingStatus('');
                                             }
@@ -754,15 +785,16 @@ export default function MarkTest() {
                         <h3 className="scan-phase-label">{currentSteps[scanPhase]?.label}</h3>
                         <p className="scan-phase-detail">{currentSteps[scanPhase]?.detail}</p>
 
-                        {/* Horizontal progress track */}
-                        <div className="scan-progress-track">
-                            {currentSteps.map((step, i) => (
-                                <div key={i} className={`scan-step-segment ${i < scanPhase ? 'done' : i === scanPhase ? 'active' : ''
-                                    }`}>
-                                    <div className="scan-step-dot" />
-                                    <span className="scan-step-name">{step.label}</span>
-                                </div>
-                            ))}
+                        {/* Real fill progress bar */}
+                        <div className="scan-bar-wrap">
+                            <div
+                                className="scan-bar-fill"
+                                style={{ width: `${scanProgress}%` }}
+                            />
+                        </div>
+                        <div className="scan-bar-meta">
+                            <span className="scan-bar-stage">{currentSteps[scanPhase]?.label}</span>
+                            <span className="scan-bar-pct">{scanProgress}%</span>
                         </div>
                     </div>
                 </div>
