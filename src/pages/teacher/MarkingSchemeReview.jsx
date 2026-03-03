@@ -498,20 +498,20 @@ export default function MarkingSchemeReview() {
                                         </div>
                                     </div>
                                 </div>
-                                ))
-                    )}
                             </div>
+                        )))
+                    }
+                </div>
 
                 {
-                                questions.length > 0 && (
-                                    <button className="btn btn-secondary add-q-btn-large" onClick={addQuestion}>
-                                        <Plus size={20} />
-                                        Add Another Question
-                                    </button>
-                                )
-                            }
+                    questions.length > 0 && (
+                        <button className="btn btn-secondary add-q-btn-large" onClick={addQuestion}>
+                            <Plus size={20} />
+                            Add Another Question
+                        </button>
+                    )
+                }
             </div>
-            </div>
-            );
+        </div>
+    );
 }
-
