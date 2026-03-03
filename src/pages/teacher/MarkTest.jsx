@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
-import { ArrowLeft, Camera, Upload, Loader, CheckCircle, AlertCircle, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, Camera, Upload, CheckCircle, AlertCircle, Sparkles, ChevronDown, ChevronUp, X, FileCheck } from 'lucide-react';
 import { createWorker } from 'tesseract.js';
 import { applyDocScanFilter } from '../../utils/imageProcessing';
 import './Page.css';
@@ -29,6 +29,26 @@ export default function MarkTest() {
     const [duplicatePrompt, setDuplicatePrompt] = useState(null);
     const [capturedImages, setCapturedImages] = useState([]);
     const [batchImages, setBatchImages] = useState([]); // All base64 images in current upload/capture
+    const [scanPhase, setScanPhase] = useState(0);
+    const [scanMode, setScanMode] = useState('upload'); // 'upload' | 'camera'
+    const [scanScriptCount, setScanScriptCount] = useState(0);
+    const [scanComplete, setScanComplete] = useState(null); // null | { success: true, count, warnings } | { success: false, ... }
+
+    const SCAN_STEPS_UPLOAD = [
+        { label: 'Preparing files', detail: 'Reading and converting your documents...' },
+        { label: 'Enhancing quality', detail: 'Applying document scan filters...' },
+        { label: 'AI analysis', detail: 'The AI examiner is reading each script...' },
+        { label: 'Mapping answers', detail: 'Cross-referencing with the marking scheme...' },
+        { label: 'Finalising', detail: 'Calculating scores and generating report...' },
+    ];
+    const SCAN_STEPS_CAMERA = [
+        { label: 'Enhancing images', detail: 'Sharpening and cleaning camera captures...' },
+        { label: 'Reading handwriting', detail: 'AI vision is analysing the scripts...' },
+        { label: 'Matching questions', detail: 'Cross-referencing with the marking scheme...' },
+        { label: 'Calculating scores', detail: 'Computing marks and percentages...' },
+        { label: 'Finalising', detail: 'Preparing results for review...' },
+    ];
+    const currentSteps = scanMode === 'camera' ? SCAN_STEPS_CAMERA : SCAN_STEPS_UPLOAD;
 
     const base64ToBlob = (base64) => {
         const byteString = atob(base64.split(',')[1]);
@@ -47,6 +67,19 @@ export default function MarkTest() {
         fetchTestData();
         fetchPupils();
     }, [testId]);
+
+    // Advance scan phase every 3s while processing
+    useEffect(() => {
+        let interval;
+        if (isProcessing) {
+            interval = setInterval(() => {
+                setScanPhase(prev => Math.min(prev + 1, currentSteps.length - 1));
+            }, 3000);
+        } else {
+            setScanPhase(0);
+        }
+        return () => clearInterval(interval);
+    }, [isProcessing, currentSteps.length]);
 
     async function fetchPupils() {
         try {
@@ -95,6 +128,10 @@ export default function MarkTest() {
         try {
             setIsProcessing(true);
             setProcessingError(null);
+            setScanComplete(null);
+            setScanMode('upload');
+            setScanScriptCount(files.length);
+            setScanPhase(0);
             setProcessingStatus('Processing uploaded files...');
 
             const processedFiles = await Promise.all(files.map(async file => {
@@ -167,7 +204,14 @@ export default function MarkTest() {
             // Store all processed images/docs for this batch
             setBatchImages(processedFiles);
             setScannedImage(processedFiles[0]);
-            setReviewBatch(parsedBatch);
+            // Show success beat before entering review
+            const lowConfCount = parsedBatch.reduce((acc, s) => acc + s.studentAnswers.filter(a => a.confidence === 'Low' || !a.student_answer).length, 0);
+            setScanComplete({
+                success: true,
+                count: parsedBatch.length,
+                warnings: lowConfCount,
+                batch: parsedBatch,
+            });
             setCurrentReviewIndex(0);
             setBatchResults([]);
             setResults(null);
@@ -608,6 +652,10 @@ export default function MarkTest() {
                                             setIsCameraOpen(false);
 
                                             try {
+                                                setScanMode('camera');
+                                                setScanScriptCount(capturedImages.length);
+                                                setScanPhase(0);
+                                                setScanComplete(null);
                                                 setIsProcessing(true);
 
                                                 // 1. Apply document scan filter to all captured images sequentially
@@ -661,11 +709,17 @@ export default function MarkTest() {
                                                 // Store filtered images for batch mapping
                                                 setBatchImages(filteredImages);
                                                 setScannedImage(filteredImages[0]);
-                                                setReviewBatch(parsedBatch);
+                                                const lowConf = parsedBatch.reduce((acc, s) => acc + s.studentAnswers.filter(a => a.confidence === 'Low' || !a.student_answer).length, 0);
+                                                setScanComplete({
+                                                    success: true,
+                                                    count: parsedBatch.length,
+                                                    warnings: lowConf,
+                                                    batch: parsedBatch,
+                                                });
                                                 setCurrentReviewIndex(0);
                                                 setBatchResults([]);
                                                 setResults(null);
-                                                setCapturedImages([]); // Reset on success
+                                                setCapturedImages([]);
                                             } catch (error) {
                                                 console.error('Scan Error:', error);
                                                 const errorMessage = error?.message || (typeof error === 'string' ? error : "Unknown error occurred.");
@@ -685,28 +739,86 @@ export default function MarkTest() {
                 </div>
             )}
 
-            {processingError && !isProcessing && !reviewData && !results && (
-                <div className="error-banner" style={{ textAlign: 'left', padding: '24px', borderRadius: '12px', background: 'var(--color-error-light)', border: '2px solid var(--color-error)', marginBottom: '24px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
-                        <AlertCircle size={32} color="var(--color-error)" />
-                        <h3 style={{ margin: 0, color: 'var(--color-error)' }}>{processingError.title}</h3>
+            {/* ── PREMIUM SCANNING CARD ─────────────────────────── */}
+            {isProcessing && (
+                <div className="scan-card" key="scanning">
+                    <div className="scan-orb-wrap">
+                        <div className="scan-orb">
+                            <div className="scan-ring scan-ring-1" />
+                            <div className="scan-ring scan-ring-2" />
+                            <Sparkles size={28} className="scan-orb-icon" />
+                        </div>
                     </div>
-                    <p style={{ margin: '0 0 16px 0', color: 'var(--color-text-primary)', fontSize: '1.1rem', lineHeight: '1.5' }}>{processingError.message}</p>
+                    <div className="scan-card-body">
+                        <p className="scan-script-chip">{scanScriptCount} script{scanScriptCount !== 1 ? 's' : ''} · AI Analysis in Progress</p>
+                        <h3 className="scan-phase-label">{currentSteps[scanPhase]?.label}</h3>
+                        <p className="scan-phase-detail">{currentSteps[scanPhase]?.detail}</p>
 
-                    {processingError.technicalDetails && (
-                        <details style={{ background: 'rgba(255,255,255,0.7)', padding: '12px', borderRadius: '8px', fontSize: '13px', marginBottom: '16px' }}>
-                            <summary style={{ cursor: 'pointer', color: 'var(--color-text-secondary)', fontWeight: 'bold' }}>Technical Details</summary>
-                            <p style={{ marginTop: '8px', fontFamily: 'monospace', wordBreak: 'break-word', color: 'var(--color-error)' }}>{processingError.technicalDetails}</p>
-                        </details>
-                    )}
+                        {/* Horizontal progress track */}
+                        <div className="scan-progress-track">
+                            {currentSteps.map((step, i) => (
+                                <div key={i} className={`scan-step-segment ${i < scanPhase ? 'done' : i === scanPhase ? 'active' : ''
+                                    }`}>
+                                    <div className="scan-step-dot" />
+                                    <span className="scan-step-name">{step.label}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
 
-                    <button
-                        className="btn btn-secondary"
-                        style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px' }}
-                        onClick={() => setProcessingError(null)}
-                    >
-                        Dismiss & Try Again
-                    </button>
+            {/* ── SCAN SUCCESS BEAT ─────────────────────────────── */}
+            {scanComplete?.success && !isProcessing && !reviewData && (
+                <div className="scan-complete-card" key="complete">
+                    <div className="scan-check-wrap">
+                        <svg viewBox="0 0 52 52" className="scan-check-svg">
+                            <circle className="scan-check-circle" cx="26" cy="26" r="24" />
+                            <path className="scan-check-mark" d="M14 27 l8 8 l16 -16" />
+                        </svg>
+                    </div>
+                    <div className="scan-complete-body">
+                        <h3>Scan Complete</h3>
+                        <p className="scan-complete-count">{scanComplete.count} script{scanComplete.count !== 1 ? 's' : ''} extracted successfully</p>
+                        {scanComplete.warnings > 0 && (
+                            <p className="scan-complete-warn">
+                                <AlertCircle size={14} />
+                                {scanComplete.warnings} answer{scanComplete.warnings !== 1 ? 's' : ''} had low confidence — review carefully
+                            </p>
+                        )}
+                        <button
+                            className="btn btn-primary scan-review-btn"
+                            onClick={() => {
+                                setReviewBatch(scanComplete.batch);
+                                setScanComplete(null);
+                            }}
+                        >
+                            <FileCheck size={18} />
+                            Review Results
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* ── SCAN ERROR CARD ───────────────────────────────── */}
+            {processingError && !isProcessing && !reviewData && !results && (
+                <div className="scan-error-card">
+                    <div className="scan-error-icon-wrap">
+                        <AlertCircle size={32} />
+                    </div>
+                    <div className="scan-error-body">
+                        <h3>{processingError.title}</h3>
+                        <p>{processingError.message}</p>
+                        {processingError.technicalDetails && (
+                            <details className="scan-error-details">
+                                <summary>Technical Details</summary>
+                                <code>{processingError.technicalDetails}</code>
+                            </details>
+                        )}
+                        <button className="btn btn-secondary" onClick={() => setProcessingError(null)}>
+                            <X size={16} /> Dismiss &amp; Try Again
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -873,47 +985,38 @@ export default function MarkTest() {
                 </div>
             )}
 
+            {/* ── BATCH COMPLETE RESULTS CARD ───────────────────── */}
             {results && (
-                <div className="success-banner-large" style={{ textAlign: "left", alignItems: "flex-start" }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-                        <CheckCircle size={48} className="icon-success" />
-                        <h2 style={{ margin: 0 }}>Batch Marking Complete!</h2>
+                <div className="scan-batch-done">
+                    <div className="scan-batch-done-header">
+                        <div className="scan-batch-check">
+                            <CheckCircle size={28} />
+                        </div>
+                        <div>
+                            <h2>Batch Marking Complete</h2>
+                            <p>{results.length} script{results.length !== 1 ? 's' : ''} saved successfully</p>
+                        </div>
                     </div>
 
-                    <p style={{ marginBottom: '16px' }}>Successfully processed {results.length} script(s).</p>
-
-                    <div className="answers-breakdown" style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '500px', overflowY: 'auto', paddingRight: '8px' }}>
-                        {results.map((res, rIdx) => (
-                            <div key={rIdx} className="result-summary-box" style={{ width: '100%' }}>
-                                <h3 style={{ margin: '0 0 12px 0' }}>{res.studentName}</h3>
-                                <p><strong>Score:</strong> {res.score} / {markingScheme.questions.length}</p>
-                                <p><strong>Percentage:</strong> {res.percentage.toFixed(1)}%</p>
-                                <details style={{ marginTop: '8px' }}>
-                                    <summary style={{ cursor: 'pointer', fontWeight: 'bold' }}>View Details</summary>
-                                    <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                        {res.studentAnswers && res.studentAnswers.map((ans, idx) => (
-                                            <div key={idx} style={{
-                                                padding: '8px',
-                                                border: `1px solid ${ans.is_correct ? '#10b981' : '#ef4444'}`,
-                                                borderRadius: '6px',
-                                                backgroundColor: ans.is_correct ? '#ecfdf5' : '#fef2f2',
-                                                fontSize: '0.9rem'
-                                            }}>
-                                                <strong>Q{ans.question_number}:</strong> {ans.student_answer || 'None'}
-                                                <span style={{ color: ans.is_correct ? '#059669' : '#dc2626', marginLeft: '8px' }}>
-                                                    ({ans.is_correct ? 'Correct' : 'Incorrect'})
-                                                </span>
-                                            </div>
-                                        ))}
+                    <div className="scan-result-list">
+                        {results.map((res, rIdx) => {
+                            const pct = res.percentage ?? 0;
+                            const tier = pct >= 80 ? 'excellent' : pct >= 65 ? 'good' : pct >= 50 ? 'average' : 'weak';
+                            return (
+                                <div key={rIdx} className="scan-result-row">
+                                    <div className="scan-result-info">
+                                        <span className="scan-result-name">{res.studentName || 'Unknown'}</span>
+                                        <span className="scan-result-fraction">{res.score}/{markingScheme.questions.length} marks</span>
                                     </div>
-                                </details>
-                            </div>
-                        ))}
+                                    <span className={`mini-badge ${tier}`}>{pct.toFixed(1)}%</span>
+                                </div>
+                            );
+                        })}
                     </div>
 
-                    <div className="banner-actions" style={{ marginTop: '24px', width: '100%', display: 'flex', gap: '12px' }}>
-                        <button className="btn btn-primary" onClick={() => { setResults(null); setBatchResults([]); }}>
-                            Mark More Scripts
+                    <div className="scan-batch-actions">
+                        <button className="btn btn-primary" onClick={() => { setResults(null); setBatchResults([]); setScanComplete(null); }}>
+                            <Camera size={16} /> Mark More Scripts
                         </button>
                         <button className="btn btn-secondary" onClick={() => navigate(`/teacher/test/${testId}`)}>
                             View All Results
@@ -922,20 +1025,7 @@ export default function MarkTest() {
                 </div>
             )}
 
-            {isProcessing && (
-                <div className="processing-overlay">
-                    <div className="processing-content">
-                        <div className="ai-loader-container">
-                            <div className="ai-ring"></div>
-                            <div className="ai-ring"></div>
-                            <div className="ai-ring"></div>
-                            <Sparkles size={32} className="ai-loader-icon" />
-                        </div>
-                        <h3>{processingStatus}</h3>
-                        <p>High-accuracy AI vision analysis in progress...</p>
-                    </div>
-                </div>
-            )}
+
 
             {showLightbox && (
                 <div className="lightbox-overlay" onClick={() => setShowLightbox(false)}>

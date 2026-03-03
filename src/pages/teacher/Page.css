@@ -1129,3 +1129,572 @@ video {
 .image-container:hover img {
     transform: scale(1.02);
 }
+
+/* ================================================================
+   PREMIUM SCANNING CARD SYSTEM
+   3 states: scanning → complete beat → error
+================================================================ */
+
+/* ── Keyframes ─────────────────────────────────────────────────── */
+@keyframes orbGlow {
+
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 rgba(28, 176, 246, 0.4), 0 0 24px rgba(28, 176, 246, 0.15);
+    }
+
+    50% {
+        box-shadow: 0 0 0 12px rgba(28, 176, 246, 0), 0 0 48px rgba(28, 176, 246, 0.25);
+    }
+}
+
+@keyframes orbitA {
+    from {
+        transform: rotate(0deg) translateX(40px) rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg) translateX(40px) rotate(-360deg);
+    }
+}
+
+@keyframes orbitB {
+    from {
+        transform: rotate(180deg) translateX(54px) rotate(-180deg);
+    }
+
+    to {
+        transform: rotate(540deg) translateX(54px) rotate(-540deg);
+    }
+}
+
+@keyframes scanFadeUp {
+    from {
+        opacity: 0;
+        transform: translateY(16px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes drawCheck {
+    from {
+        stroke-dashoffset: 100;
+    }
+
+    to {
+        stroke-dashoffset: 0;
+    }
+}
+
+@keyframes circleIn {
+    from {
+        stroke-dashoffset: 160;
+        opacity: 0;
+    }
+
+    to {
+        stroke-dashoffset: 0;
+        opacity: 1;
+    }
+}
+
+@keyframes shakeIn {
+    0% {
+        transform: translateX(0);
+    }
+
+    20% {
+        transform: translateX(-8px);
+    }
+
+    40% {
+        transform: translateX(7px);
+    }
+
+    60% {
+        transform: translateX(-5px);
+    }
+
+    80% {
+        transform: translateX(3px);
+    }
+
+    100% {
+        transform: translateX(0);
+    }
+}
+
+@keyframes textCycle {
+    0% {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+
+    10% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    85% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    100% {
+        opacity: 0;
+        transform: translateY(-6px);
+    }
+}
+
+/* ── SCANNING CARD ─────────────────────────────────────────────── */
+.scan-card {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    background: white;
+    border: 2px solid rgba(28, 176, 246, 0.3);
+    border-radius: 20px;
+    padding: 28px 32px;
+    margin-bottom: 24px;
+    box-shadow: 0 8px 32px rgba(28, 176, 246, 0.1);
+    animation: scanFadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Orb */
+.scan-orb-wrap {
+    flex-shrink: 0;
+    width: 80px;
+    height: 80px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.scan-orb {
+    width: 56px;
+    height: 56px;
+    background: linear-gradient(135deg, var(--color-accent-primary), #7C3AED);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: orbGlow 2s ease-in-out infinite;
+    position: relative;
+    z-index: 1;
+}
+
+.scan-orb-icon {
+    color: white;
+    animation: bounce-rotate 3s ease-in-out infinite;
+}
+
+/* Orbiting rings */
+.scan-ring {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-accent-primary);
+    opacity: 0.7;
+}
+
+.scan-ring-1 {
+    animation: orbitA 2.5s linear infinite;
+}
+
+.scan-ring-2 {
+    animation: orbitB 3.5s linear infinite;
+    background: #7C3AED;
+}
+
+/* Body */
+.scan-card-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.scan-script-chip {
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--color-accent-secondary);
+    margin: 0 0 8px;
+}
+
+.scan-phase-label {
+    font-size: 20px;
+    font-weight: 900;
+    color: var(--color-text-primary);
+    margin: 0 0 4px;
+    letter-spacing: -0.02em;
+    animation: textCycle 3s ease-in-out infinite;
+}
+
+.scan-phase-detail {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-tertiary);
+    margin: 0 0 20px;
+    animation: textCycle 3s ease-in-out infinite;
+}
+
+/* Horizontal progress track */
+.scan-progress-track {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+    position: relative;
+}
+
+.scan-step-segment {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    position: relative;
+}
+
+/* Connecting line between dots */
+.scan-step-segment:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    right: -50%;
+    height: 2px;
+    background: var(--color-border-light);
+    z-index: 0;
+    transition: background 400ms ease;
+}
+
+.scan-step-segment.done:not(:last-child)::after,
+.scan-step-segment.active:not(:last-child)::after {
+    background: var(--color-accent-primary);
+}
+
+.scan-step-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid var(--color-border);
+    background: white;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+    transition: all 300ms ease;
+}
+
+.scan-step-segment.done .scan-step-dot {
+    background: var(--color-accent-primary);
+    border-color: var(--color-accent-primary);
+}
+
+.scan-step-segment.active .scan-step-dot {
+    background: white;
+    border-color: var(--color-accent-primary);
+    border-width: 3px;
+    box-shadow: 0 0 0 4px rgba(28, 176, 246, 0.2);
+}
+
+.scan-step-name {
+    font-size: 10px;
+    font-weight: 800;
+    color: var(--color-text-tertiary);
+    text-align: center;
+    line-height: 1.2;
+    transition: color 300ms ease;
+    word-break: break-word;
+}
+
+.scan-step-segment.done .scan-step-name,
+.scan-step-segment.active .scan-step-name {
+    color: var(--color-accent-secondary);
+}
+
+/* ── SCAN COMPLETE CARD ─────────────────────────────────────────── */
+.scan-complete-card {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    background: white;
+    border: 2px solid #A7F3D0;
+    border-radius: 20px;
+    padding: 28px 32px;
+    margin-bottom: 24px;
+    box-shadow: 0 8px 32px rgba(5, 150, 105, 0.1);
+    animation: scanFadeUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.scan-check-wrap {
+    flex-shrink: 0;
+    width: 64px;
+    height: 64px;
+}
+
+.scan-check-svg {
+    width: 64px;
+    height: 64px;
+}
+
+.scan-check-circle {
+    fill: none;
+    stroke: #10b981;
+    stroke-width: 2.5;
+    stroke-dasharray: 160;
+    stroke-dashoffset: 160;
+    animation: circleIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.1s forwards;
+}
+
+.scan-check-mark {
+    fill: none;
+    stroke: #10b981;
+    stroke-width: 3.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-dasharray: 100;
+    stroke-dashoffset: 100;
+    animation: drawCheck 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.55s forwards;
+}
+
+.scan-complete-body h3 {
+    font-size: 20px;
+    font-weight: 900;
+    color: var(--color-text-primary);
+    margin: 0 0 4px;
+    letter-spacing: -0.02em;
+}
+
+.scan-complete-count {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--color-text-secondary);
+    margin: 0 0 8px;
+}
+
+.scan-complete-warn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #D97706;
+    background: #FFFBEB;
+    border: 1px solid #FDE68A;
+    border-radius: 8px;
+    padding: 6px 10px;
+    margin: 0 0 14px;
+    width: fit-content;
+}
+
+.scan-review-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+/* ── SCAN ERROR CARD ────────────────────────────────────────────── */
+.scan-error-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    background: white;
+    border: 2px solid #FECACA;
+    border-radius: 20px;
+    padding: 28px 32px;
+    margin-bottom: 24px;
+    box-shadow: 0 8px 32px rgba(239, 68, 68, 0.08);
+    animation: shakeIn 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+.scan-error-icon-wrap {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    background: #FEF2F2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #DC2626;
+    flex-shrink: 0;
+}
+
+.scan-error-body h3 {
+    font-size: 17px;
+    font-weight: 900;
+    color: #DC2626;
+    margin: 0 0 6px;
+}
+
+.scan-error-body p {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    margin: 0 0 14px;
+    line-height: 1.6;
+}
+
+.scan-error-details {
+    background: #FFF5F5;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 14px;
+    font-size: 12px;
+}
+
+.scan-error-details summary {
+    cursor: pointer;
+    font-weight: 700;
+    color: #DC2626;
+    margin-bottom: 4px;
+}
+
+.scan-error-details code {
+    display: block;
+    margin-top: 6px;
+    font-family: monospace;
+    word-break: break-all;
+    color: #7f1d1d;
+}
+
+/* ── BATCH DONE CARD ────────────────────────────────────────────── */
+.scan-batch-done {
+    background: white;
+    border: 2px solid #A7F3D0;
+    border-radius: 20px;
+    padding: 28px 32px;
+    margin-bottom: 24px;
+    animation: scanFadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.scan-batch-done-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1.5px solid var(--color-border-light);
+}
+
+.scan-batch-check {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    background: #ECFDF5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #059669;
+    flex-shrink: 0;
+}
+
+.scan-batch-done-header h2 {
+    font-size: 20px;
+    font-weight: 900;
+    color: var(--color-text-primary);
+    margin: 0 0 2px;
+    letter-spacing: -0.02em;
+}
+
+.scan-batch-done-header p {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--color-text-tertiary);
+    margin: 0;
+}
+
+.scan-result-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 20px;
+}
+
+.scan-result-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--color-bg-primary);
+    border-radius: 10px;
+    padding: 10px 14px;
+}
+
+.scan-result-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.scan-result-name {
+    font-size: 14px;
+    font-weight: 800;
+    color: var(--color-text-primary);
+}
+
+.scan-result-fraction {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--color-text-tertiary);
+}
+
+.scan-batch-actions {
+    display: flex;
+    gap: 12px;
+}
+
+/* mini-badge (shared with StudentProfile) */
+.mini-badge {
+    font-size: 11px;
+    font-weight: 800;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.mini-badge.excellent {
+    background: #ECFDF5;
+    color: #059669;
+}
+
+.mini-badge.good {
+    background: var(--color-accent-light);
+    color: var(--color-accent-secondary);
+}
+
+.mini-badge.average {
+    background: #FFFBEB;
+    color: #D97706;
+}
+
+.mini-badge.weak {
+    background: #FEF2F2;
+    color: #DC2626;
+}
+
+@media (max-width: 640px) {
+
+    .scan-card,
+    .scan-complete-card,
+    .scan-error-card,
+    .scan-batch-done {
+        flex-direction: column;
+        padding: 20px;
+        gap: 16px;
+    }
+
+    .scan-batch-actions {
+        flex-direction: column;
+    }
+
+    .scan-step-name {
+        display: none;
+    }
+}
