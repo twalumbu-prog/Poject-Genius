@@ -250,8 +250,14 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
         if (filteredScheme.length === 0) filteredScheme = markingScheme;
       }
 
-      const schemeText = JSON.stringify(filteredScheme, null, 2);
-      const questionCount = filteredScheme.length;
+      // Sanitize scheme to remove correct answers (preventing AI hallucinations/cheating)
+      const sanitizedScheme = filteredScheme.map((item: any) => ({
+        question_number: item.question_number,
+        marks: item.marks
+      }));
+
+      const schemeText = JSON.stringify(sanitizedScheme, null, 2);
+      const questionCount = sanitizedScheme.length;
 
       messages = [
         {
@@ -277,13 +283,14 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
             "   → Extract the number exactly as written.\n\n" +
             "4. SHADED BUBBLES / OMR (Fallback):\n" +
             "   → EXTREMELY CRITICAL: Bubbles are arranged in columns L-to-R: [A] [B] [C] [D].\n" +
-            "   → Identify which bubble (A/B/C/D) is shaded for each row.\n" +
+            "   → VISUAL ANCHORING: For each question, first locate the PRINTED NUMBER (e.g., \"20.\") on the far left.\n" +
+            "   → Then, trace the horizontal line to find the shaded bubble (A/B/C/D) in THAT EXACT ROW.\n" +
             "   → Look for cross-marks (X) or solid shading.\n\n" +
             "══ SPATIAL REASONING RULES ══\n" +
-            "- DO NOT guess the answer based on context. Only extract what is VISUALLY PRESENT.\n" +
+            "- DO NOT guess based on context. Only extract what is VISUALLY PRESENT in the image.\n" +
             "- If multiple bubbles are shaded, list them all (e.g., \"A, B\").\n" +
-            "- ORIENTATION: Treat the image as 'Head-Up'. Column A is always the leftmost in a 4-bubble group.\n" +
-            "- AMBIGUITY: If a student changed their mind (e.g. scribbled out A and marked C), extract C and explain in rationale.\n" +
+            "- ORIENTATION: The image has been auto-rotated. Treat the top-left as [0,0].\n" +
+            "- RATIONALE: You MUST provide a visual rationale for every answer (e.g., \"Found number 20 on left, bubble C is crossed out with a blue pen.\").\n" +
             "- STUDENT NAME IDENTIFICATION (CRITICAL):\n" +
             "  → First, scan the top 20% of the image for ANY labels like \"Name:\", \"Pupil:\", \"Student:\", \"Names:\", \"Surname:\", or \"First Name:\".\n" +
             "  → Extract the handwritten text found in the immediate vicinity (usually to the right or below these labels).\n" +

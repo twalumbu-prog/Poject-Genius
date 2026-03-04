@@ -6,7 +6,9 @@ export function detectCandidates(warpedImageData, gridModel) {
 
     // For each expected intersection in the grid, we look for a bubble
     gridModel.rows.forEach(row => {
-        gridModel.cols.forEach(col => {
+        // Multi-column support: use columns specific to this row/block
+        const cols = row.columns || gridModel.cols;
+        cols.forEach(col => {
             // Sample a patch around the expected center
             const centerX = col.x;
             const centerY = row.y;

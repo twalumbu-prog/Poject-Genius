@@ -223,46 +223,99 @@ function discoverGridRobust(imageData) {
         let rowSum = 0;
         for (let x = 0; x < width; x++) {
             const i = (y * width + x) * 4;
+            // Use luminosity
             const l = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
             rowSum += (255 - l);
         }
         horizontalProfile[y] = rowSum / width;
     }
 
+    // 1. Detect Rows
     const rows = [];
-    const threshold = 25;
+    const hThreshold = 25;
     let lastY = -100;
     for (let y = 100; y < height - 100; y++) {
-        if (horizontalProfile[y] > threshold && horizontalProfile[y] > horizontalProfile[y - 1] && horizontalProfile[y] > horizontalProfile[y + 1]) {
+        if (horizontalProfile[y] > hThreshold && horizontalProfile[y] > horizontalProfile[y - 1] && horizontalProfile[y] > horizontalProfile[y + 1]) {
             if (y - lastY > 30) {
-                rows.push({ y, h: 40, question_number: rows.length + 1 });
+                rows.push({ y, h: 40 });
                 lastY = y;
             }
         }
     }
 
-    const cols = [];
-    if (rows.length > 0) {
-        const verticalProfile = new Float32Array(width);
-        for (let x = 0; x < width; x++) {
-            let colSum = 0;
-            for (const row of rows) {
-                const i = (row.y * width + x) * 4;
-                const l = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-                colSum += (255 - l);
-            }
-            verticalProfile[x] = colSum / rows.length;
+    if (rows.length === 0) return { rows: [], cols: [] };
+
+    // 2. Vertical Profile across the image
+    const verticalProfile = new Float32Array(width);
+    for (let x = 0; x < width; x++) {
+        let colSum = 0;
+        for (const row of rows) {
+            const i = (row.y * width + x) * 4;
+            const l = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+            colSum += (255 - l);
         }
-        let lastX = -100;
-        for (let x = 100; x < width - 100; x++) {
-            if (verticalProfile[x] > 20 && verticalProfile[x] > verticalProfile[x - 1] && verticalProfile[x] > verticalProfile[x + 1]) {
-                if (x - lastX > 60) {
-                    cols.push({ x, w: 40, label: String.fromCharCode(65 + cols.length) });
-                    lastX = x;
-                    if (cols.length >= 5) break;
-                }
+        verticalProfile[x] = colSum / rows.length;
+    }
+
+    // 3. Detect ALL Column Peaks
+    const allCols = [];
+    let lastX = -100;
+    for (let x = 50; x < width - 50; x++) {
+        if (verticalProfile[x] > 15 && verticalProfile[x] > verticalProfile[x - 1] && verticalProfile[x] > verticalProfile[x + 1]) {
+            if (x - lastX > 50) {
+                allCols.push({ x, w: 40 });
+                lastX = x;
             }
         }
     }
-    return { rows, cols };
+
+    // 4. Group Columns into Blocks (usually 5 columns per block: Num + A,B,C,D)
+    // We look for larger gaps between blocks
+    const blocks = [];
+    let currentBlock = [];
+    for (let i = 0; i < allCols.length; i++) {
+        const col = allCols[i];
+        if (currentBlock.length === 0) {
+            currentBlock.push(col);
+        } else {
+            const prevCol = currentBlock[currentBlock.length - 1];
+            if (col.x - prevCol.x < 150) { // Same block
+                currentBlock.push(col);
+            } else { // New block
+                if (currentBlock.length >= 4) blocks.push(currentBlock);
+                currentBlock = [col];
+            }
+        }
+    }
+    if (currentBlock.length >= 4) blocks.push(currentBlock);
+
+    console.log(`[OPR Grid] Detected ${blocks.length} column blocks.`);
+
+    // 5. Expand rows to map to blocks
+    // In multi-column, questions 1-20 are block 0, 21-40 are block 1, etc.
+    const expandedRows = [];
+    const questionsPerBlock = rows.length;
+
+    blocks.forEach((block, blockIdx) => {
+        // Label columns in block (A, B, C, D)
+        // Usually the first peak is the number, followed by A,B,C,D
+        // If 5 peaks: [Num, A, B, C, D]. If 4 peaks: [A, B, C, D]
+        const blockCols = block.map((c, i) => ({
+            ...c,
+            label: block.length === 5 ? (i === 0 ? 'NUM' : String.fromCharCode(64 + i)) : String.fromCharCode(65 + i)
+        }));
+
+        rows.forEach((row, rowIdx) => {
+            expandedRows.push({
+                ...row,
+                question_number: blockIdx * questionsPerBlock + (rowIdx + 1),
+                columns: blockCols.filter(c => c.label !== 'NUM')
+            });
+        });
+    });
+
+    return {
+        rows: expandedRows,
+        cols: blocks[0]?.map((c, i) => ({ ...c, label: String.fromCharCode(65 + i) })) || []
+    };
 }
