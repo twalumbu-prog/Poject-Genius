@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { ArrowLeft, Camera, Upload, CheckCircle, AlertCircle, Sparkles, ChevronDown, ChevronUp, X, FileCheck } from 'lucide-react';
 import { createWorker } from 'tesseract.js';
 import { explodeFilesToImages, processForVLM, blobToBase64 } from '../../utils/imageProcessing';
+import { normalizeQuestionNumber } from '../../utils/ocrValidation';
 import './Page.css';
 
 export default function MarkTest() {
@@ -164,15 +165,40 @@ export default function MarkTest() {
         }
     }
 
-    // ── Phase 4: Bulk Processing Queue ──────────────────────────────────
-    // Processes scripts via queue to prevent Edge constraints out-of-memory.
+    // ── Phase 4: Bulk Processing Queue (Hardened V2) ─────────────────────
+    // Processes scripts via queue to prevent Edge OOM edge cases.
+    // Queue backpressure: pauses intake if pending jobs exceed safe threshold.
     const processScriptImages = async (imageObjects) => {
+        const QUEUE_BACKPRESSURE_LIMIT = 10; // Safety: pause if pending > this
+        const BASE_RETRY_DELAY_MS = 1000;
+        const MAX_RETRIES = 2;
+
         const total = imageObjects.length;
         const parsedBatch = new Array(total).fill(null);
 
+        // ── Part 5: Exponential backoff with jitter ────────────────────────
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+        /**
+         * Determines if an error is retriable (network, 5xx only).
+         * NEVER retries on 4xx, validation, or schema errors.
+         */
+        const isRetriableError = (err) => {
+            if (!err) return false;
+            const msg = err.message || '';
+            // Retry on network failures or 5xx server errors
+            if (err.name === 'TypeError' || msg.toLowerCase().includes('failed to fetch')) return true;
+            const httpMatch = msg.match(/HTTP (\d+)/);
+            if (httpMatch) {
+                const status = parseInt(httpMatch[1]);
+                return status >= 500; // Only 5xx
+            }
+            return false;
+        };
+
         const queue = imageObjects.map((obj, i) => ({ ...obj, index: i, retries: 0 }));
         let activeExecutions = 0;
-        const maxConcurrency = 2; // Process 2 at a time
+        const maxConcurrency = 2;
 
         return new Promise((resolve) => {
             const executeNext = async () => {
@@ -180,6 +206,13 @@ export default function MarkTest() {
                     resolve(parsedBatch.filter(Boolean));
                     return;
                 }
+
+                // ── Part 4: Queue backpressure guard ──────────────────────
+                if (queue.length > QUEUE_BACKPRESSURE_LIMIT) {
+                    setProcessingStatus(`Queue backpressure: ${queue.length} jobs pending. Waiting for drain...`);
+                    await sleep(2000);
+                }
+
                 while (queue.length > 0 && activeExecutions < maxConcurrency) {
                     const item = queue.shift();
                     activeExecutions++;
@@ -220,7 +253,9 @@ export default function MarkTest() {
 
                     if (!response.ok) {
                         const errData = await response.json().catch(() => ({}));
-                        throw new Error(errData.message || errData.error || `HTTP ${response.status}`);
+                        const err = new Error(errData.message || errData.error || `HTTP ${response.status}`);
+                        err.httpStatus = response.status;
+                        throw err;
                     }
 
                     const data = await response.json();
@@ -228,9 +263,38 @@ export default function MarkTest() {
 
                     const studentData = resultsArray[0];
                     if (studentData) {
+                        // ── Part 1: Bulletproof Normalized Question Mapping ────────────
+                        // Build a precomputed O(n) normalized integer map of AI answers.
+                        // This avoids quadratic find() calls and catches LLM format drift.
+                        const aiAnswerMap = new Map();
+                        const duplicateWarnings = [];
+
+                        if (studentData.answers) {
+                            studentData.answers.forEach(a => {
+                                const normKey = normalizeQuestionNumber(a.question_number);
+                                if (normKey === null) {
+                                    console.warn('[OCR] AI returned answer with unparseable question_number:', a.question_number);
+                                    return;
+                                }
+                                if (aiAnswerMap.has(normKey)) {
+                                    // Part 1.3: Duplicate handling — keep FIRST, log warning
+                                    duplicateWarnings.push({ normKey, duplicate: a });
+                                    console.warn(`[OCR] Duplicate AI answer for Q${normKey} — keeping first occurrence`, a);
+                                } else {
+                                    aiAnswerMap.set(normKey, a);
+                                }
+                            });
+                        }
+
+                        if (duplicateWarnings.length > 0) {
+                            console.warn(`[OCR] Script ${index + 1}: ${duplicateWarnings.length} duplicate answer(s) detected`, duplicateWarnings);
+                        }
+
+                        // Map each scheme question using the normalized map (O(1) lookup)
                         let unmapped = [];
-                        let mappedAnswers = markingScheme.questions.map(q => {
-                            const aiAns = studentData.answers?.find(a => String(a.question_number).trim() === String(q.question_number).trim());
+                        const mappedAnswers = markingScheme.questions.map(q => {
+                            const normQ = normalizeQuestionNumber(q.question_number);
+                            const aiAns = normQ !== null ? aiAnswerMap.get(normQ) : undefined;
                             return {
                                 question_number: q.question_number,
                                 student_answer: aiAns?.student_answer || '',
@@ -241,10 +305,14 @@ export default function MarkTest() {
                             };
                         });
 
+                        // Find truly unmapped AI answers (those that never matched a scheme question)
+                        const schemeNormSet = new Set(
+                            markingScheme.questions.map(q => normalizeQuestionNumber(q.question_number)).filter(n => n !== null)
+                        );
                         if (studentData.answers) {
                             studentData.answers.forEach(a => {
-                                const mapped = markingScheme.questions.some(q => String(q.question_number).trim() === String(a.question_number).trim());
-                                if (!mapped) unmapped.push(a);
+                                const normKey = normalizeQuestionNumber(a.question_number);
+                                if (normKey === null || !schemeNormSet.has(normKey)) unmapped.push(a);
                             });
                         }
 
@@ -254,17 +322,30 @@ export default function MarkTest() {
                             grade: studentData.grade || '',
                             imageIndex: index,
                             studentAnswers: mappedAnswers,
-                            unmappedAnswers: unmapped
+                            unmappedAnswers: unmapped,
+                            // Part 6 telemetry metadata from Edge
+                            _debugMeta: {
+                                raw_llm_count: data.raw_llm_count,
+                                repaired_count: data.repaired_count,
+                                duplicate_count: duplicateWarnings.length,
+                                validation_passed: data.validation_passed
+                            }
                         };
                     }
                     advanceScanProgress();
                 } catch (scriptError) {
-                    if (item.retries < 2) {
-                        console.warn(`Script ${index + 1} failed, retrying... (${item.retries + 1}/2)`, scriptError.message);
+                    // ── Part 5: Exponential backoff retry with jitter ─────────────────
+                    // Only retry on retriable errors (network errors, 5xx). Never retry 4xx.
+                    const canRetry = item.retries < MAX_RETRIES && isRetriableError(scriptError);
+                    if (canRetry) {
+                        const jitterFactor = 0.8 + Math.random() * 0.4; // ±20% jitter
+                        const delay = BASE_RETRY_DELAY_MS * Math.pow(2, item.retries) * jitterFactor;
+                        console.warn(`[AI Scan] Script ${index + 1} failed (retry ${item.retries + 1}/${MAX_RETRIES}) in ${Math.round(delay)}ms`, scriptError.message);
                         item.retries++;
+                        await sleep(delay);
                         queue.push(item);
                     } else {
-                        console.error(`Script ${index + 1} permanently failed:`, scriptError.message);
+                        console.error(`[AI Scan] Script ${index + 1} permanently failed (${scriptError.message || 'Unknown'})`);
                         parsedBatch[index] = {
                             studentName: `Unknown (${label})`,
                             studentId: '',
@@ -278,7 +359,8 @@ export default function MarkTest() {
                                 feedback: `Script failed: ${scriptError.message}`,
                                 confidence: 'Low',
                                 topic: q.topic
-                            }))
+                            })),
+                            unmappedAnswers: []
                         };
                         advanceScanProgress();
                     }
@@ -1117,6 +1199,53 @@ export default function MarkTest() {
                                             </pre>
                                         </div>
                                     )}
+
+                                    {/* Part 6.2: AI Debug Panel — shown when Edge reports anomalies */}
+                                    {(() => {
+                                        const meta = reviewData._debugMeta;
+                                        if (!meta) return null;
+                                        const hasAnomalies = meta.repaired_count > 0 || meta.duplicate_count > 0 || meta.validation_passed === false;
+                                        const hasLowConfidenceCluster = reviewData.studentAnswers?.filter(a => a.confidence === 'Low').length >= 3;
+                                        if (!hasAnomalies && !hasLowConfidenceCluster) return null;
+                                        return (
+                                            <details style={{ marginTop: '20px', border: '1px solid #fbbf24', borderRadius: '8px', overflow: 'hidden' }}>
+                                                <summary style={{
+                                                    padding: '12px 16px',
+                                                    background: '#fffbeb',
+                                                    color: '#92400e',
+                                                    cursor: 'pointer',
+                                                    fontWeight: 600,
+                                                    fontSize: '0.88rem',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '8px',
+                                                    listStyle: 'none'
+                                                }}>
+                                                    <AlertCircle size={15} />
+                                                    AI Debug Details
+                                                    {meta.repaired_count > 0 && <span style={{ background: '#fde68a', color: '#78350f', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem' }}>{meta.repaired_count} repaired</span>}
+                                                    {meta.duplicate_count > 0 && <span style={{ background: '#fed7aa', color: '#7c2d12', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem' }}>{meta.duplicate_count} duplicates</span>}
+                                                    {hasLowConfidenceCluster && <span style={{ background: '#fee2e2', color: '#7f1d1d', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem' }}>Low confidence cluster</span>}
+                                                </summary>
+                                                <div style={{ padding: '16px', background: '#fefce8' }}>
+                                                    <table style={{ width: '100%', fontSize: '0.82rem', borderCollapse: 'collapse' }}>
+                                                        <tbody>
+                                                            <tr><td style={{ padding: '4px 8px', color: '#78350f', width: '60%' }}>Raw LLM answer count</td><td style={{ fontWeight: 600 }}>{meta.raw_llm_count ?? '—'}</td></tr>
+                                                            <tr><td style={{ padding: '4px 8px', color: '#78350f' }}>Auto-repaired missing answers</td><td style={{ fontWeight: 600, color: meta.repaired_count > 0 ? '#b45309' : '#16a34a' }}>{meta.repaired_count ?? '—'}</td></tr>
+                                                            <tr><td style={{ padding: '4px 8px', color: '#78350f' }}>Duplicate question numbers</td><td style={{ fontWeight: 600, color: meta.duplicate_count > 0 ? '#b45309' : '#16a34a' }}>{meta.duplicate_count ?? '—'}</td></tr>
+                                                            <tr><td style={{ padding: '4px 8px', color: '#78350f' }}>Edge validation passed</td><td style={{ fontWeight: 600, color: meta.validation_passed ? '#16a34a' : '#dc2626' }}>{meta.validation_passed === true ? 'Yes' : meta.validation_passed === false ? 'No' : '—'}</td></tr>
+                                                            <tr><td style={{ padding: '4px 8px', color: '#78350f' }}>Low confidence answers</td><td style={{ fontWeight: 600 }}>{reviewData.studentAnswers?.filter(a => a.confidence === 'Low').length ?? '—'}</td></tr>
+                                                        </tbody>
+                                                    </table>
+                                                    {meta.repaired_count > 0 && (
+                                                        <p style={{ marginTop: '10px', fontSize: '0.78rem', color: '#92400e', background: '#fde68a', padding: '8px 12px', borderRadius: '6px' }}>
+                                                            ⚠️ {meta.repaired_count} question(s) were not found in the AI response and were auto-filled as "Unanswered". Check the scan quality and re-scan if needed.
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </details>
+                                        );
+                                    })()}
                                 </>
                             )}
                         </div>
