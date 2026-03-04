@@ -77,15 +77,20 @@ self.onmessage = async (e) => {
             const sanity = validateSheet(rowResults);
 
             console.log('[OPR] Complete!');
+            // Create a blob from warpedImageData for debugging
+            const debugCanvas = new OffscreenCanvas(geometry.warpedImageData.width, geometry.warpedImageData.height);
+            debugCanvas.getContext('2d').putImageData(geometry.warpedImageData, 0, 0);
+            const warpedBlob = await debugCanvas.convertToBlob();
+
             self.postMessage({
                 success: true,
-                omrResults: rowResults,
+                results: rowResults,
                 layoutResult: geometry.layoutResult,
-                telemetry: {
-                    quality,
-                    geometry,
-                    sanity,
-                    opr_version: '1.0.0-beta'
+                warpedBlob, // Return the image for UI verification
+                meta: {
+                    blurScore: quality.blurScore,
+                    glareScore: quality.glareScore,
+                    version: '1.0.0-beta'
                 }
             });
 

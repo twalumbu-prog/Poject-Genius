@@ -276,11 +276,14 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
             "3. NUMERIC ANSWER:\n" +
             "   → Extract the number exactly as written.\n\n" +
             "4. SHADED BUBBLES / OMR (Fallback):\n" +
-            "   → Identify which bubble (A/B/C/D) is shaded for each row.\n\n" +
-            "══ GENERAL RULES ══\n" +
+            "   → EXTREMELY CRITICAL: Bubbles are arranged in columns L-to-R: [A] [B] [C] [D].\n" +
+            "   → Identify which bubble (A/B/C/D) is shaded for each row.\n" +
+            "   → Look for cross-marks (X) or solid shading.\n\n" +
+            "══ SPATIAL REASONING RULES ══\n" +
             "- DO NOT guess the answer based on context. Only extract what is VISUALLY PRESENT.\n" +
             "- If multiple bubbles are shaded, list them all (e.g., \"A, B\").\n" +
-            "- If a student wrote something beside a bubble, extract that text.\n" +
+            "- ORIENTATION: Treat the image as 'Head-Up'. Column A is always the leftmost in a 4-bubble group.\n" +
+            "- AMBIGUITY: If a student changed their mind (e.g. scribbled out A and marked C), extract C and explain in rationale.\n" +
             "- STUDENT NAME IDENTIFICATION (CRITICAL):\n" +
             "  → First, scan the top 20% of the image for ANY labels like \"Name:\", \"Pupil:\", \"Student:\", \"Names:\", \"Surname:\", or \"First Name:\".\n" +
             "  → Extract the handwritten text found in the immediate vicinity (usually to the right or below these labels).\n" +

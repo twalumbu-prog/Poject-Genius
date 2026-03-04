@@ -27,6 +27,16 @@ export default function MarkTest() {
     const [batchResults, setBatchResults] = useState([]);
 
     const [scannedImage, setScannedImage] = useState(null);
+    const [warpedImage, setWarpedImage] = useState(null); // Vision pipeline output
+
+    useEffect(() => {
+        if (reviewData?._debugMeta?.warped_blob) {
+            setWarpedImage(reviewData._debugMeta.warped_blob);
+        } else {
+            setWarpedImage(null);
+        }
+    }, [reviewData]);
+
     const [isCameraOpen, setIsCameraOpen] = useState(false);
     const [isFlashActive, setIsFlashActive] = useState(false);
     const [showAnswers, setShowAnswers] = useState(false);
@@ -314,6 +324,7 @@ export default function MarkTest() {
                         console.warn(`[${engine.toUpperCase()}] Worker failed for script ${index + 1}: ${omrResponse.error}. Falling back to full OCR.`);
                         if (omrResponse.stack) console.error(`[${engine.toUpperCase()} Stack]`, omrResponse.stack);
                     }
+                    const warpedBlob = omrResponse.warpedBlob;
 
                     let omrResults = omrResponse.omrResults || [];
 
@@ -476,6 +487,7 @@ export default function MarkTest() {
                                 telemetry: formatTelemetryForUI(telemetry),
                                 needs_review: telemetry.needs_human_review,
                                 review_flags: telemetry.review_flags,
+                                warped_blob: warpedBlob, // Store the warped image
                             }
 
                         };
@@ -1405,7 +1417,23 @@ export default function MarkTest() {
                                         </div>
                                     )}
 
-                                    {/* Part 6.2: Production Vision Telemetry Panel */}
+                                    {/* Vision Debug Panel */}
+                                    {warpedImage && (
+                                        <div className="vision-debug-box" style={{ marginTop: '20px', padding: '16px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px' }}>
+                                            <h4 style={{ color: '#166534', marginBottom: '8px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                <Sparkles size={16} />
+                                                Vision Pipeline Output (Warped Scan)
+                                            </h4>
+                                            <p style={{ fontSize: '0.8rem', color: '#166534', marginBottom: '12px' }}>
+                                                This is the corrected image used for processing. Use this to verify alignment and rotation.
+                                            </p>
+                                            <img
+                                                src={URL.createObjectURL(warpedImage)}
+                                                alt="Warped Scan"
+                                                style={{ width: '100%', borderRadius: '4px', border: '1px solid #86efac' }}
+                                            />
+                                        </div>
+                                    )}
                                     {(() => {
                                         const meta = reviewData._debugMeta;
                                         if (!meta) return null;

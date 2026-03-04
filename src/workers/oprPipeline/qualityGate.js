@@ -18,7 +18,7 @@ export function checkQuality(imageData) {
     console.log(`[OPR Quality] Blur: ${Math.round(blurScore)}, Glare: ${(glareScore * 100).toFixed(2)}%`);
 
     const ACCEPTABLE_BLUR = 80; // Standard threshold
-    const MAX_GLARE_RATIO = 0.15; // Increased from 0.05 to be less sensitive
+    const MAX_GLARE_RATIO = 0.40; // Extremely lenient to allow WhatsApp photos
 
     let accepted = true;
     let reason = '';
