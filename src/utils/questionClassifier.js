@@ -87,10 +87,44 @@ export function computeGrayscale(imageData) {
     return gray;
 }
 
-export function binarize(grayArray, width, height, threshold = 180) {
+// 1A. Smart Binarization using Integral Image (Bradley Adaptive)
+export function binarizeAdaptive(grayArray, width, height) {
+    const integral = new Uint32Array(width * height);
+    for (let y = 0; y < height; y++) {
+        let sum = 0;
+        for (let x = 0; x < width; x++) {
+            sum += grayArray[y * width + x];
+            integral[y * width + x] = sum + (y > 0 ? integral[(y - 1) * width + x] : 0);
+        }
+    }
+
     const binary = new Uint8Array(width * height);
-    for (let i = 0; i < grayArray.length; i++) {
-        binary[i] = grayArray[i] < threshold ? 1 : 0; // 1 = dark ink, 0 = white paper
+    // window size clamp based on dimensions
+    const s = Math.max(12, Math.min(40, Math.floor(Math.min(width, height) / 40)));
+    const s2 = Math.floor(s / 2);
+    const t = 15; // 15% darker than average to be ink
+
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const x1 = Math.max(x - s2, 0);
+            const y1 = Math.max(y - s2, 0);
+            const x2 = Math.min(x + s2, width - 1);
+            const y2 = Math.min(y + s2, height - 1);
+            const count = (x2 - x1) * (y2 - y1);
+
+            const sum = integral[y2 * width + x2]
+                - (y1 > 0 ? integral[(y1 - 1) * width + x2] : 0)
+                - (x1 > 0 ? integral[y2 * width + (x1 - 1)] : 0)
+                + (y1 > 0 && x1 > 0 ? integral[(y1 - 1) * width + (x1 - 1)] : 0);
+
+            const mean = sum / count;
+
+            if (grayArray[y * width + x] < mean * ((100 - t) / 100)) {
+                binary[y * width + x] = 1; // ink
+            } else {
+                binary[y * width + x] = 0; // paper
+            }
+        }
     }
     return binary;
 }
@@ -249,63 +283,103 @@ export function findBlobs(binary, width, height, roiStartY, roiHeight) {
     return blobs;
 }
 
-// 5. Shape Heuristics & Classification
+// 5. Hardened Shape Heuristics & Classification
 export function classifyROI(blobs, expectedBubbles = 4) {
     let circleCount = 0;
     let textBlobs = 0;
 
-    const validCircles = blobs.filter(blob => {
+    // Track stats for ROI Confidence telemetry
+    const validCircles = [];
+    let avgW = 0, avgH = 0;
+
+    for (const blob of blobs) {
         const w = blob.maxX - blob.minX + 1;
         const h = blob.maxY - blob.minY + 1;
 
         // Exclude tiny noise and massive lines
-        if (blob.area < 50 || blob.area > 5000) return false;
+        if (blob.area < 15 || blob.area > 5000) continue;
 
         const aspectRatio = Math.max(w, h) / Math.min(w, h);
-        if (aspectRatio > 1.5) {
-            if (w > 20) textBlobs++; // likely a word/line
-            return false;
+        if (aspectRatio > 1.4) {
+            if (w > 12) textBlobs++;
+            continue;
         }
 
-        // Circularity Score = 4 * PI * Area / Perimeter^2
-        // Perfect circle = 1.0. Square = ~0.78. 
-        if (blob.perimeter === 0) return false;
-        const circularity = (4 * Math.PI * blob.area) / (blob.perimeter * blob.perimeter);
+        // Hardened Bubble Checks: Solid OR Hollow Ring
+        // Bounding box area
+        const bbArea = w * h;
+        const fillRatio = blob.area / bbArea; // Perfect solid circle is 0.78. Hollow ring is lower (e.g. 0.15 - 0.45)
 
-        // Strict circularity to reject checkboxes and dense text characters like '0' or 'O'
-        if (circularity >= 0.65 && circularity <= 1.25) {
-            return true;
+        let isBubble = false;
+
+        if (blob.perimeter > 0) {
+            const circularity = (4 * Math.PI * blob.area) / (blob.perimeter * blob.perimeter);
+
+            // Branch A: Solid shaded circle
+            if (fillRatio > 0.6) {
+                if (circularity > 0.6 && circularity <= 1.25) {
+                    isBubble = true;
+                }
+            }
+            // Branch B: Unshaded hollow bubble (ring)
+            else if (fillRatio > 0.08 && fillRatio < 0.6) {
+                // For a ring, circularity is very low. But it is perfectly symmetric
+                // We use bounding box symmetry instead
+                if (aspectRatio <= 1.25) {
+                    isBubble = true; // Symmetric hollow square/circle
+                }
+            }
         }
-        textBlobs++;
-        return false;
-    });
+
+        if (isBubble) {
+            validCircles.push(blob);
+            avgW += w;
+            avgH += h;
+        } else {
+            textBlobs++;
+        }
+    }
 
     circleCount = validCircles.length;
+    avgW = circleCount > 0 ? avgW / circleCount : 0;
+    avgH = circleCount > 0 ? avgH / circleCount : 0;
+
+    // Variance check
+    let sizeVariance = 0;
+    if (circleCount > 0) {
+        for (const c of validCircles) {
+            const cw = c.maxX - c.minX + 1;
+            sizeVariance += Math.pow(cw - avgW, 2);
+        }
+        sizeVariance /= circleCount;
+    }
 
     let type = "unknown";
     let confidence = 0.0;
 
-    // If we see at least 3 identical circles aligned in a row, it's highly likely an OMR question
+    // Hardened Routing logic
     if (circleCount >= 3) {
         type = "omr";
         confidence = Math.min(1.0, circleCount / expectedBubbles);
 
-        // Decrease confidence if there is a massive amount of text next to it 
-        // that shouldn't be in a pure-bubble answer sheet column
+        // Penalize variance (OMR bubbles should be identical size)
+        if (sizeVariance > Math.pow(avgW * 0.3, 2)) {
+            confidence -= 0.4;
+        }
         if (textBlobs > 20) {
             confidence -= 0.3;
         }
     } else if (textBlobs > 5) {
-        type = "ocr"; // Lots of irregular blobs = handwriting/paragraphs
+        type = "ocr";
         confidence = 0.8;
     }
 
     if (confidence < 0) confidence = 0;
 
-    // Sort valid circles left-to-right for Stage B
+    // Sort valid circles left-to-right
     validCircles.sort((a, b) => a.minX - b.minX);
 
-    return { type, confidence, circleBlobs: validCircles };
+    return { type, confidence, circleBlobs: validCircles, bubble_count: circleCount, size_variance: sizeVariance };
 }
 
 /**
@@ -347,9 +421,9 @@ export async function classifyQuestionRegions(imageBitmap, markingSchemeCount) {
     ctx.drawImage(imageBitmap, 0, 0);
     const finalImageData = ctx.getImageData(0, 0, width, height);
 
-    // 1. Convert & Binarize
+    // 1. Convert & Binarize (Adaptive)
     const gray = computeGrayscale(finalImageData);
-    const binary = binarize(gray, width, height, 180); // Strict threshold to isolate dark print from faint shading
+    const binary = binarizeAdaptive(gray, width, height);
 
     // 2. Horizontal Slicing
     const hProfile = computeHorizontalProjection(binary, width, height);

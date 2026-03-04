@@ -5,6 +5,7 @@ import { ArrowLeft, Camera, Upload, CheckCircle, AlertCircle, Sparkles, ChevronD
 import { explodeFilesToImages, processForVLM, blobToBase64 } from '../../utils/imageProcessing';
 import { normalizeQuestionNumber } from '../../utils/ocrValidation';
 import { mergeHybridAnswers } from '../../utils/hybridAnswerMerger';
+import { computeScriptTelemetry, formatTelemetryForUI } from '../../utils/visionTelemetry';
 import './Page.css';
 
 export default function MarkTest() {
@@ -228,10 +229,49 @@ export default function MarkTest() {
                 setProcessingStatus(`Marking script ${index + 1} of ${total}${total > 1 ? `: ${label}` : ''}...`);
 
                 try {
-                    // --- STAGE B: DETERMINISTIC OMR ENGINE ---
-                    setProcessingStatus(`[OMR] Analysing layout and bubbles for script ${index + 1}...`);
+                    // --- STAGE 0: PAGE REGISTRATION ---
+                    setProcessingStatus(`[Registration] Aligning page geometry for script ${index + 1}...`);
                     const blob = base64ToBlob(base64);
-                    const imageBitmap = await createImageBitmap(blob);
+                    const rawBitmap = await createImageBitmap(blob);
+
+                    const regWorker = new Worker(new URL('../../workers/pageRegistrationWorker.js', import.meta.url), { type: 'module' });
+                    const regPromise = new Promise((res, rej) => {
+                        regWorker.onmessage = (e) => res(e.data);
+                        regWorker.onerror = (err) => rej(err);
+                    });
+
+                    regWorker.postMessage({
+                        type: 'PROCESS_PAGE',
+                        imageBitmap: rawBitmap
+                    }, [rawBitmap]); // Transfer ownership to worker
+
+                    const regResponse = await regPromise;
+                    regWorker.terminate();
+
+                    let finalImageBitmap;
+                    let finalBase64 = base64; // Fallback to original
+
+                    if (regResponse.page_detected && regResponse.warpedImageData) {
+                        // Stage 0 succeeded. Convert warped ImageData back to ImageBitmap
+                        finalImageBitmap = await createImageBitmap(regResponse.warpedImageData);
+
+                        // Convert warped image to Base64 for the VLM Edge Function fallback
+                        const tempCanvas = document.createElement('canvas');
+                        tempCanvas.width = regResponse.warpedImageData.width;
+                        tempCanvas.height = regResponse.warpedImageData.height;
+                        const tempCtx = tempCanvas.getContext('2d');
+                        tempCtx.putImageData(regResponse.warpedImageData, 0, 0);
+                        finalBase64 = tempCanvas.toDataURL('image/jpeg', 0.8);
+                    } else {
+                        // Registration failed or low confidence, recreate bitmap from original
+                        const freshBlob = base64ToBlob(base64);
+                        finalImageBitmap = await createImageBitmap(freshBlob);
+                    }
+
+                    const page_confidence = regResponse.page_confidence || 0;
+
+                    // --- STAGE A & B: DETERMINISTIC OMR ENGINE ---
+                    setProcessingStatus(`[OMR] Analysing layout and bubbles for script ${index + 1}...`);
 
                     const omrWorker = new Worker(new URL('../../workers/omrWorker.js', import.meta.url), { type: 'module' });
 
@@ -243,9 +283,9 @@ export default function MarkTest() {
                     omrWorker.postMessage({
                         messageType: 'PROCESS_OMR',
                         id: index,
-                        imageBitmap,
+                        imageBitmap: finalImageBitmap,
                         markingSchemeCount: markingScheme.questions.length
-                    }, [imageBitmap]); // Transfer ownership to worker
+                    }, [finalImageBitmap]); // Transfer ownership to worker
 
                     const omrResponse = await omrPromise;
                     omrWorker.terminate();
@@ -271,7 +311,7 @@ export default function MarkTest() {
 
                     const payload = {
                         mode: 'mark_script',
-                        image: base64,
+                        image: finalBase64,
                         imageIndex: index,
                         markingScheme: markingScheme.questions,
                         target_questions,
@@ -359,6 +399,13 @@ export default function MarkTest() {
                             });
                         }
 
+                        const telemetry = computeScriptTelemetry(
+                            regResponse,
+                            omrResponse,
+                            mappedAnswers,
+                            markingScheme.questions.length
+                        );
+
                         parsedBatch[index] = {
                             studentName: studentData.studentName || '',
                             studentId: studentData.student_id || '',
@@ -366,17 +413,21 @@ export default function MarkTest() {
                             imageIndex: index,
                             studentAnswers: mappedAnswers,
                             unmappedAnswers: unmapped,
-                            // Extracted edge server metadata + Stage B metadata
                             _debugMeta: {
                                 raw_llm_count: data.raw_llm_count || 0,
                                 repaired_count: data.repaired_count || 0,
                                 duplicate_count: duplicateWarnings.length,
                                 validation_passed: data.validation_passed || false,
+                                page_confidence,
                                 omr_layout: omrResponse.layoutResult,
-                                omr_confidence: Object.values(omrResults).reduce((acc, obj) => acc + (obj.confidence || 0), 0) / (omrResults.length || 1),
+                                omr_confidence: (omrResults.reduce((acc, obj) => acc + (obj.confidence || 0), 0)) / (omrResults.length || 1),
                                 hybrid_omr_used: hybridPayload._debugMeta?.omr_used || 0,
-                                hybrid_ocr_used: hybridPayload._debugMeta?.ocr_used || 0
+                                hybrid_ocr_used: hybridPayload._debugMeta?.ocr_used || 0,
+                                telemetry: formatTelemetryForUI(telemetry),
+                                needs_review: telemetry.needs_human_review,
+                                review_flags: telemetry.review_flags,
                             }
+
                         };
                     }
                     advanceScanProgress();

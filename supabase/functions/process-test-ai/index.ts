@@ -261,9 +261,15 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
             "3. NUMERIC ANSWER — Student wrote a number.\n" +
             "   → Extract the number. Accept equivalent forms (e.g. 0.5 = 1/2 = 50%).\n" +
             "   → Mark correct if within reasonable rounding for the context.\n\n" +
-            "4. SHADED BUBBLES / OMR (Fallback Only):\n" +
-            "   → If you are forced to grade a bubble question, find the darkest shaded circle.\n" +
-            "   → If you are unsure, guessing is FORBIDDEN. Write 'Unanswered'.\n\n" +
+            "4. SHADED BUBBLES / OMR (Fallback — Deterministic Engine Was Uncertain):\n" +
+            "   The pixel engine was NOT confident for these questions. You MUST attempt them.\n" +
+            "   Use this Chain-of-Thought approach:\n" +
+            "   STEP 1: Locate the answer grid row for this question number.\n" +
+            "   STEP 2: Identify the answer options left-to-right (they represent A, B, C, D).\n" +
+            "   STEP 3: Assess relative darkness — the shaded option is clearly darker.\n" +
+            "   STEP 4: Output the letter of the darkest shaded option.\n" +
+            "   STEP 5: If two options are equally dark (erasure/double-mark), output 'Unanswered', confidence='Low'.\n" +
+            "   CRITICAL: DO NOT guess. Use only visual evidence. If unresolvable, write 'Unanswered'.\n\n" +
             "══ GENERAL RULES ══\n" +
             "- STUDENT NAME IDENTIFICATION (CRITICAL):\n" +
             "  → First, scan the top 20% of the image for ANY labels like \"Name:\", \"Pupil:\", \"Student:\", \"Names:\", \"Surname:\", or \"First Name:\".\n" +

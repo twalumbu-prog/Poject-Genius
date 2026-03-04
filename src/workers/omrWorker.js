@@ -1,8 +1,13 @@
+/* src/workers/omrWorker.js */
 import { classifyQuestionRegions } from '../utils/questionClassifier.js';
 
 /**
  * Stage B Deterministic OMR Engine Web Worker
- * NO AI. NO VLM. PURE PIXEL MATH.
+ * Production-Grade Hardened Version with:
+ * - Bubble interior masking (erose border ring)
+ * - Page-adaptive fill thresholds (global_darkness_index)
+ * - Strict multi-signal ambiguity detection
+ * - Full telemetry per-question output
  */
 
 self.onmessage = async (e) => {
@@ -12,7 +17,7 @@ self.onmessage = async (e) => {
         try {
             const { imageBitmap, markingSchemeCount, id } = e.data;
 
-            // 1. Pass the bitmap to Stage A for Layout Classification
+            // 1. Stage A: Layout Classification (deskew, column detection, bubble grouping)
             const layoutResult = await classifyQuestionRegions(imageBitmap, markingSchemeCount);
 
             const omrResults = [];
@@ -22,9 +27,12 @@ self.onmessage = async (e) => {
                 const imageData = layoutResult.correctedImageData;
                 const width = imageData.width;
 
+                // B.0 Compute page-level darkness calibration (for adaptive thresholds)
+                const pageCalibration = computePageCalibration(imageData.data, width, imageData.height);
+
                 for (const roi of layoutResult.regions) {
-                    if (roi.type === 'omr' && roi.confidence > 0.6) {
-                        const result = processOMRQuestion(imageData, width, roi);
+                    if (roi.type === 'omr' && roi.confidence > 0.5) {
+                        const result = processOMRQuestion(imageData, width, roi, pageCalibration);
                         omrResults.push(result);
                     }
                 }
@@ -47,126 +55,162 @@ self.onmessage = async (e) => {
     }
 };
 
+// ─── B.0 PAGE CALIBRATION ─────────────────────────────────────────────────
+
 /**
- * Stage B Core Logic: Mathematical Fill Ratio Analysis
+ * Compute page-level ink vs background statistics for adaptive thresholds.
+ * Subsamples pixels (every 8th for speed) to compute:
+ * - mean_background: expected brightness of blank paper
+ * - global_darkness_index: normalized scale of how dark marks are vs paper
  */
-function processOMRQuestion(imageData, fullWidth, roi) {
-    const optionsArray = ['A', 'B', 'C', 'D', 'E'];
+function computePageCalibration(data, width, height) {
+    const STEP = 8;
+    let lightsum = 0, lightcount = 0;
+    let darksum = 0, darkcount = 0;
+
+    for (let y = 0; y < height; y += STEP) {
+        for (let x = 0; x < width; x += STEP) {
+            const idx = (y * width + x) * 4;
+            const luma = data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
+            if (luma > 200) {
+                lightsum += luma; lightcount++;
+            } else if (luma < 80) {
+                darksum += luma; darkcount++;
+            }
+        }
+    }
+
+    const mean_background = lightcount > 0 ? lightsum / lightcount : 240;
+    const mean_mark = darkcount > 0 ? darksum / darkcount : 40;
+
+    // Global darkness index: range 0..1 where 1 means very high contrast (ideal)
+    const global_darkness_index = Math.min(1, (mean_background - mean_mark) / 200);
+
+    // Derive adaptive thresholds
+    // In good lighting: clear threshold = ~0.22, margin = ~0.08
+    // In low contrast (faint pencil): relax thresholds
+    const thresholds = {
+        dark_luma: mean_background - (mean_background - mean_mark) * 0.5,
+        clear_fill: Math.max(0.12, 0.22 - (1 - global_darkness_index) * 0.08),
+        clear_margin: Math.max(0.05, 0.08 - (1 - global_darkness_index) * 0.04),
+        blank_fill: Math.max(0.05, 0.10 - (1 - global_darkness_index) * 0.04),
+        ambiguous_margin: Math.max(0.04, 0.08 - (1 - global_darkness_index) * 0.03),
+    };
+
+    return { mean_background, mean_mark, global_darkness_index, thresholds };
+}
+
+// ─── B.1 OMR QUESTION PROCESSOR ───────────────────────────────────────────
+
+const optionsArray = ['A', 'B', 'C', 'D', 'E'];
+
+function processOMRQuestion(imageData, fullWidth, roi, pageCalibration) {
     const data = imageData.data;
     const fillRatios = {};
-
-    // roi.omr_options contains the {minX, maxX, minY, maxY} for each bubble circle 
-    // found in Stage A, sorted left to right.
     const bubbles = roi.omr_options;
+    const { thresholds } = pageCalibration;
 
     for (let i = 0; i < bubbles.length && i < optionsArray.length; i++) {
         const bubble = bubbles[i];
         const letter = optionsArray[i];
 
-        // Calculate the interior bounding box (shave off 20% to avoid the thick printed black border itself)
-        const w = bubble.maxX - bubble.minX;
-        const h = bubble.maxY - bubble.minY;
-        const padX = Math.round(w * 0.2);
-        const padY = Math.round(h * 0.2);
+        // B.1 Bubble Interior Masking:
+        // Erode bubble bounding box inward to ignore the thick printed circle border.
+        // 25% erosion gets us past the circle ring into the pure interior.
+        const bw = bubble.maxX - bubble.minX;
+        const bh = bubble.maxY - bubble.minY;
+        const padX = Math.round(bw * 0.25);
+        const padY = Math.round(bh * 0.25);
 
         const inMinX = bubble.minX + padX;
         const inMaxX = bubble.maxX - padX;
-        const inMinY = bubble.minY + padY; // global Y since roi.omr_options stores global Y from Stage A logic
+        const inMinY = bubble.minY + padY;
         const inMaxY = bubble.maxY - padY;
 
-        let darkPixels = 0;
-        let totalPixels = 0;
-
-        // Standard threshold for clear pen/pencil
-        const threshold = 160;
-
-        for (let y = inMinY; y <= inMaxY; y++) {
-            for (let x = inMinX; x <= inMaxX; x++) {
-                const idx = (y * fullWidth + x) * 4;
-                // Luminance
-                const luma = data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
-                if (luma < threshold) {
-                    darkPixels++;
-                }
-                totalPixels++;
-            }
+        if (inMaxX <= inMinX || inMaxY <= inMinY) {
+            fillRatios[letter] = 0;
+            continue;
         }
 
-        let ratio = totalPixels > 0 ? darkPixels / totalPixels : 0;
-
-        // --- Light Pencil Retry ---
-        // If it looks blank but might just be faint HB pencil, try a softer threshold
-        if (ratio > 0.05 && ratio < 0.22) {
-            let softDark = 0;
-            const softThreshold = 200; // Much lighter gray 
-            for (let y = inMinY; y <= inMaxY; y++) {
-                for (let x = inMinX; x <= inMaxX; x++) {
-                    const idx = (y * fullWidth + x) * 4;
-                    const luma = data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
-                    if (luma < softThreshold) softDark++;
-                }
-            }
-            const softRatio = softDark / totalPixels;
-            // Only boost the ratio if the soft threshold reveals significantly more fill
-            if (softRatio > ratio * 1.5) {
-                ratio = softRatio * 0.8; // conservative boost
-            }
-        }
-
+        const { darkCount, totalCount } = countInteriorDarkPixels(data, fullWidth, inMinX, inMaxX, inMinY, inMaxY, thresholds.dark_luma);
+        const ratio = totalCount > 0 ? darkCount / totalCount : 0;
         fillRatios[letter] = ratio;
     }
 
-    // 3. Decision Logic
+    return decideBubbleAnswer(roi.inferred_question_number, fillRatios, thresholds, roi.confidence);
+}
+
+// ─── B.2 INTERIOR PIXEL COUNTING ──────────────────────────────────────────
+
+function countInteriorDarkPixels(data, fullWidth, minX, maxX, minY, maxY, darkLumaThreshold) {
+    let darkCount = 0;
+    let totalCount = 0;
+
+    for (let y = minY; y <= maxY; y++) {
+        for (let x = minX; x <= maxX; x++) {
+            const idx = (y * fullWidth + x) * 4;
+            const luma = data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
+            if (luma < darkLumaThreshold) darkCount++;
+            totalCount++;
+        }
+    }
+    return { darkCount, totalCount };
+}
+
+// ─── B.3 STRICT DECISION LOGIC ────────────────────────────────────────────
+
+function decideBubbleAnswer(questionNumber, fillRatios, thresholds, roiConfidence) {
     const letters = Object.keys(fillRatios);
+
     if (letters.length === 0) {
-        return {
-            question_number: roi.inferred_question_number,
-            detected_answer: null,
-            method: "omr",
-            confidence: 0,
-            fill_ratios: {},
-            status: "blank"
-        };
+        return { question_number: questionNumber, detected_answer: null, method: 'omr', confidence: 0, fill_ratios: {}, status: 'blank' };
     }
 
-    // Sort letters by highest ratio
     letters.sort((a, b) => fillRatios[b] - fillRatios[a]);
 
     const max_ratio = fillRatios[letters[0]];
     const second_ratio = letters.length > 1 ? fillRatios[letters[1]] : 0;
     const margin = max_ratio - second_ratio;
 
-    let status = "ambiguous";
+    let status = 'ambiguous';
     let answer = null;
     let confidence = 0;
 
-    // Case 4: Blank
-    if (max_ratio < 0.12) {
-        status = "blank";
-    }
-    // Case 1: Clear mark
-    else if (max_ratio >= 0.22 && margin >= 0.08) {
-        status = "clear";
+    // Strict Ambiguity Conditions. ANY of these being true forces ambiguous.
+    const isBlank = max_ratio < thresholds.blank_fill;
+    const isMarginTooNarrow = margin < thresholds.ambiguous_margin;
+    const isMultipleFilled = letters.filter(l => fillRatios[l] > thresholds.blank_fill * 1.5).length > 1;
+    const isROIUnconfident = roiConfidence < 0.55;
+
+    if (isBlank) {
+        status = 'blank';
+    } else if (isROIUnconfident || isMarginTooNarrow || isMultipleFilled) {
+        // Force to VLM fallback — do NOT guess
+        status = 'ambiguous';
+    } else if (max_ratio >= thresholds.clear_fill && margin >= thresholds.clear_margin) {
+        status = 'clear';
         answer = letters[0];
-        confidence = Math.min(1.0, 0.7 + margin);
-    }
-    // Case 3: Ambiguous (e.g., student shaded two circles, or scribbled one out)
-    else if (margin < 0.08) {
-        status = "ambiguous";
-    }
-    // Edge case: light mark but clear margin
-    else if (max_ratio >= 0.12 && margin >= 0.08) {
-        status = "clear";
+        confidence = Math.min(1.0, 0.65 + margin * 2 + roiConfidence * 0.2);
+    } else if (max_ratio >= thresholds.blank_fill * 1.5 && margin >= thresholds.clear_margin) {
+        // Light mark but decisive margin — lower confidence clear
+        status = 'clear';
         answer = letters[0];
-        confidence = 0.6; // lower confidence because it was light
+        confidence = 0.55;
     }
 
     return {
-        question_number: roi.inferred_question_number,
+        question_number: questionNumber,
         detected_answer: answer,
-        method: "omr",
+        method: 'omr',
         confidence,
         fill_ratios: fillRatios,
-        status
+        status,
+        // Telemetry pass-through
+        _telemetry: {
+            max_ratio: parseFloat(max_ratio.toFixed(4)),
+            margin: parseFloat(margin.toFixed(4)),
+            is_multi_filled: isMultipleFilled,
+            roi_confidence: parseFloat(roiConfidence.toFixed(3)),
+        }
     };
 }
