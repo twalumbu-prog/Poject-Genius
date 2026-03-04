@@ -10,123 +10,73 @@ import PdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 pdfjsLib.GlobalWorkerOptions.workerSrc = PdfjsWorker;
 
 const PDF_RENDER_SCALE = 1.8; // ~1620px wide for an A4 page — good for OCR
-const MAX_IMAGE_DIM = 1800; // Increased to 1800px per user strategy (downscale to sweet spot)
+
+import ImageWorker from '../workers/imageWorker.js?worker';
+
+
+import ImageWorker from "../workers/imageWorker.js?worker";
 
 /**
- * Applies Bradley's Adaptive Thresholding optimized with an Integral Image (Summed Area Table).
- * This prevents UI freezing (O(1) local mean) and preserves faint text under uneven lighting perfectly.
- * We blend the binary threshold map 60% with 40% of the original grayscale to retain physical paper context.
- * @param {string} base64Image
- * @returns {Promise<string>}
+ * Processes an image for Vision Language Model OCR (Gemini).
+ * Offloads heavy downscaling, mild contrast, sharpening, and compression to a Web Worker.
+ *
+ * @param {Blob | File | string} imageObj - The image to process.
+ * @param {boolean} faintTextAssist - IF true, applies VERY LIGHT adaptive enhancement (≤ 20% blend).
+ * @returns {Promise<{blob: Blob, width: number, height: number, sizeKB: number}>}
  */
-export async function applyDocScanFilter(base64Image) {
-    if (!base64Image.startsWith('data:image/')) return base64Image;
-
-    return new Promise((resolve) => {
-        const img = new Image();
-        img.onload = () => {
-            let { width, height } = img;
-            if (width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM) {
-                const scale = MAX_IMAGE_DIM / Math.max(width, height);
-                width = Math.round(width * scale);
-                height = Math.round(height * scale);
+export function processForVLM(imageObj, faintTextAssist = false) {
+    return new Promise(async (resolve, reject) => {
+        try {
+            let blob = imageObj;
+            
+            // If passed a base64 string, convert it to a Blob first
+            if (typeof imageObj === "string" && imageObj.startsWith("data:image/")) {
+                const res = await fetch(imageObj);
+                blob = await res.blob();
+            } else if (!(imageObj instanceof Blob)) {
+                return reject(new Error("processForVLM requires a Blob, File, or base64 string."));
             }
 
-            const canvas = document.createElement('canvas');
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-
-            // Smoother downscaling
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'high';
-            ctx.drawImage(img, 0, 0, width, height);
-
-            const imageData = ctx.getImageData(0, 0, width, height);
-            const d = imageData.data;
-
-            const w = width;
-            const h = height;
-
-            // Typed arrays for high-performance memory reads/writes
-            const integral = new Uint32Array(w * h);
-            const grayData = new Uint8Array(w * h);
-
-            // 1. Pass: Compute Grayscale and Integral Image (Summed Area Table)
-            for (let y = 0; y < h; y++) {
-                let rowSum = 0;
-                for (let x = 0; x < w; x++) {
-                    const i = y * w + x;
-                    const dataIdx = i * 4;
-
-                    // Standard luminance conversion
-                    const gray = Math.round(0.299 * d[dataIdx] + 0.587 * d[dataIdx + 1] + 0.114 * d[dataIdx + 2]);
-                    grayData[i] = gray;
-                    rowSum += gray;
-
-                    // I(x,y) = current_row_sum + I(x, y-1)
-                    integral[i] = rowSum + (y > 0 ? integral[(y - 1) * w + x] : 0);
-                }
-            }
-
-            // 2. Pass: Local Mean Thresholding (Bradley)
-            // Window size S = width / 32 (scales with image size, ~50px for a 1600px image - ideal for handwriting)
-            const radius = Math.max(15, Math.floor(w / 32));
-            const T = 0.12; // 12% darker than the local average marks it as ink (prevents noise)
-
-            for (let y = 0; y < h; y++) {
-                for (let x = 0; x < w; x++) {
-                    const i = y * w + x;
-
-                    // Local window boundaries
-                    const x1 = Math.max(0, x - radius);
-                    const y1 = Math.max(0, y - radius);
-                    const x2 = Math.min(w - 1, x + radius);
-                    const y2 = Math.min(h - 1, y + radius);
-
-                    const count = (x2 - x1 + 1) * (y2 - y1 + 1);
-
-                    // O(1) Local Sum via Integral Image formula
-                    let sum = integral[y2 * w + x2];
-                    if (y1 > 0) sum -= integral[(y1 - 1) * w + x2];
-                    if (x1 > 0) sum -= integral[y2 * w + (x1 - 1)];
-                    if (x1 > 0 && y1 > 0) sum += integral[(y1 - 1) * w + (x1 - 1)];
-
-                    const mean = sum / count;
-                    const pixelGray = grayData[i];
-
-                    // Bradley decision
-                    let thresholded = 255; // default paper
-                    if (pixelGray < mean * (1 - T)) {
-                        thresholded = 0; // mark as ink
+            const worker = new ImageWorker();
+            const id = Date.now().toString() + Math.random().toString();
+            
+            worker.onmessage = (e) => {
+                const { type, id: resId, result, error } = e.data;
+                if (resId === id) {
+                    if (type === "done") {
+                        resolve(result); // { blob, width, height, sizeKB }
+                    } else if (type === "error") {
+                        reject(new Error(error));
                     }
-
-                    // Blend: 60% pure black/white structure + 40% original grayscale context
-                    const blended = Math.round((thresholded * 0.6) + (pixelGray * 0.4));
-
-                    const dataIdx = i * 4;
-                    d[dataIdx] = blended;
-                    d[dataIdx + 1] = blended;
-                    d[dataIdx + 2] = blended;
+                    worker.terminate();
                 }
-            }
+            };
 
-            ctx.putImageData(imageData, 0, 0);
+            worker.onerror = (err) => {
+                reject(err);
+                worker.terminate();
+            };
 
-            // Export aggressively compressed JPEG (0.75-0.8) to hit our ~300KB payload target
-            resolve(canvas.toDataURL('image/jpeg', 0.8));
-        };
-        img.onerror = () => resolve(base64Image);
-        img.src = base64Image;
+            worker.postMessage({ id, imageBlob: blob, faintTextAssist });
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
+
+/**
+ * Helper to convert Blob back to Base64 (since our React app currently relies heavily on Base64 state)
+ */
+export function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
     });
 }
 
 // ── pdfToImages ───────────────────────────────────────────────────────────────
-/**
- * Converts every page of a PDF into a high-contrast JPEG.
- * @param {string} base64Pdf
- * @returns {Promise<string[]>}
- */
 export async function pdfToImages(base64Pdf) {
     const base64Data = base64Pdf.split(',')[1];
     const binaryStr = atob(base64Data);

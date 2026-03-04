@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { ArrowLeft, Camera, Upload, CheckCircle, AlertCircle, Sparkles, ChevronDown, ChevronUp, X, FileCheck } from 'lucide-react';
 import { createWorker } from 'tesseract.js';
-import { explodeFilesToImages, applyDocScanFilter } from '../../utils/imageProcessing';
+import { explodeFilesToImages, processForVLM, blobToBase64 } from '../../utils/imageProcessing';
 import './Page.css';
 
 export default function MarkTest() {
@@ -164,91 +164,120 @@ export default function MarkTest() {
         }
     }
 
-    // ── Core: sequential per-image AI processing ────────────────────────
-    // One API call per script — isolates failures and improves accuracy.
+    // ── Phase 4: Bulk Processing Queue ──────────────────────────────────
+    // Processes scripts via queue to prevent Edge constraints out-of-memory.
     const processScriptImages = async (imageObjects) => {
         const total = imageObjects.length;
-        const parsedBatch = [];
+        const parsedBatch = new Array(total).fill(null);
 
-        for (let i = 0; i < total; i++) {
-            const { base64, label } = imageObjects[i];
-            setProcessingStatus(`Marking script ${i + 1} of ${total}${total > 1 ? `: ${label}` : ''}...`);
+        const queue = imageObjects.map((obj, i) => ({ ...obj, index: i, retries: 0 }));
+        let activeExecutions = 0;
+        const maxConcurrency = 2; // Process 2 at a time
 
-            try {
-                const payload = {
-                    mode: 'mark_script',
-                    image: base64,
-                    imageIndex: i,
-                    markingScheme: markingScheme.questions,
-                    geminiKey: import.meta.env.VITE_GEMINI_API_KEY
-                };
-                const payloadSize = Math.round(JSON.stringify(payload).length / 1024);
-                console.log(`[AI Scan] Sending script ${i + 1} (${label}). Size: ${payloadSize}KB`);
-
-                const response = await fetch(
-                    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-test-ai`,
-                    {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-                            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-                        },
-                        body: JSON.stringify(payload)
-                    }
-                );
-
-                if (!response.ok) {
-                    const errData = await response.json().catch(() => ({}));
-                    throw new Error(errData.message || errData.error || `HTTP ${response.status}`);
+        return new Promise((resolve) => {
+            const executeNext = async () => {
+                if (queue.length === 0 && activeExecutions === 0) {
+                    resolve(parsedBatch.filter(Boolean));
+                    return;
                 }
-
-                const data = await response.json();
-                const resultsArray = data.results ? data.results : [data];
-                resultsArray.forEach(studentData => {
-                    parsedBatch.push({
-                        studentName: studentData.studentName || '',
-                        studentId: studentData.student_id || '',
-                        grade: studentData.grade || '',
-                        imageIndex: i,
-                        studentAnswers: markingScheme.questions.map(q => {
-                            const aiAns = studentData.answers?.find(a => a.question_number === q.question_number);
-                            return {
-                                question_number: q.question_number,
-                                student_answer: aiAns?.student_answer || '',
-                                is_correct: aiAns ? aiAns.is_correct : false,
-                                feedback: aiAns?.feedback || (aiAns ? '' : 'Not found in extraction'),
-                                confidence: aiAns?.confidence || 'Low',
-                                topic: q.topic
-                            };
-                        })
+                while (queue.length > 0 && activeExecutions < maxConcurrency) {
+                    const item = queue.shift();
+                    activeExecutions++;
+                    processItem(item).finally(() => {
+                        activeExecutions--;
+                        executeNext();
                     });
-                });
-            } catch (scriptError) {
-                console.warn(`Script ${i + 1} (${label}) failed:`, scriptError.message);
-                // Push a placeholder so the reviewer can manually correct it
-                parsedBatch.push({
-                    studentName: `Unknown (${label})`,
-                    studentId: '',
-                    grade: '',
-                    imageIndex: i,
-                    _failed: true,
-                    studentAnswers: markingScheme.questions.map(q => ({
-                        question_number: q.question_number,
-                        student_answer: '',
-                        is_correct: false,
-                        feedback: `Script failed: ${scriptError.message}`,
-                        confidence: 'Low',
-                        topic: q.topic
-                    }))
-                });
-            }
+                }
+            };
 
-            advanceScanProgress();
-        }
+            const processItem = async (item) => {
+                const { base64, label, index } = item;
+                setProcessingStatus(`Marking script ${index + 1} of ${total}${total > 1 ? `: ${label}` : ''}...`);
 
-        return parsedBatch;
+                try {
+                    const payload = {
+                        mode: 'mark_script',
+                        image: base64,
+                        imageIndex: index,
+                        markingScheme: markingScheme.questions,
+                        geminiKey: import.meta.env.VITE_GEMINI_API_KEY
+                    };
+                    const payloadSize = Math.round(JSON.stringify(payload).length / 1024);
+                    console.log(`[AI Scan] Sending script ${index + 1} (${label}). Size: ${payloadSize}KB`);
+
+                    const response = await fetch(
+                        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-test-ai`,
+                        {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+                                'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+                            },
+                            body: JSON.stringify(payload)
+                        }
+                    );
+
+                    if (!response.ok) {
+                        const errData = await response.json().catch(() => ({}));
+                        throw new Error(errData.message || errData.error || `HTTP ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    const resultsArray = data.results ? data.results : [data];
+
+                    const studentData = resultsArray[0];
+                    if (studentData) {
+                        parsedBatch[index] = {
+                            studentName: studentData.studentName || '',
+                            studentId: studentData.student_id || '',
+                            grade: studentData.grade || '',
+                            imageIndex: index,
+                            studentAnswers: markingScheme.questions.map(q => {
+                                const aiAns = studentData.answers?.find(a => a.question_number === q.question_number);
+                                return {
+                                    question_number: q.question_number,
+                                    student_answer: aiAns?.student_answer || '',
+                                    is_correct: aiAns ? aiAns.is_correct : false,
+                                    feedback: aiAns?.feedback || (aiAns ? '' : 'Not found in extraction'),
+                                    confidence: aiAns?.confidence || 'Low',
+                                    topic: q.topic
+                                };
+                            })
+                        };
+                    }
+                    advanceScanProgress();
+                } catch (scriptError) {
+                    if (item.retries < 2) {
+                        console.warn(`Script ${index + 1} failed, retrying... (${item.retries + 1}/2)`, scriptError.message);
+                        item.retries++;
+                        queue.push(item);
+                    } else {
+                        console.error(`Script ${index + 1} permanently failed:`, scriptError.message);
+                        parsedBatch[index] = {
+                            studentName: `Unknown (${label})`,
+                            studentId: '',
+                            grade: '',
+                            imageIndex: index,
+                            _failed: true,
+                            studentAnswers: markingScheme.questions.map(q => ({
+                                question_number: q.question_number,
+                                student_answer: '',
+                                is_correct: false,
+                                feedback: `Script failed: ${scriptError.message}`,
+                                confidence: 'Low',
+                                topic: q.topic
+                            }))
+                        };
+                        advanceScanProgress();
+                    }
+                }
+            };
+
+            executeNext();
+        });
     };
+
 
     // ── Upload handler ───────────────────────────────────────────────────
     const handleFileUpload = async (event) => {
@@ -651,7 +680,8 @@ export default function MarkTest() {
                                             video: {
                                                 facingMode: 'environment',
                                                 width: { ideal: 4096 },
-                                                height: { ideal: 2160 }
+                                                height: { ideal: 2160 },
+                                                focusMode: 'continuous'
                                             }
                                         })
                                             .then(stream => { el.srcObject = stream; el.play(); })
@@ -664,7 +694,7 @@ export default function MarkTest() {
                             <div className="scanner-overlay">
                                 <div className="scanner-frame"></div>
                                 <div className="scanner-hint" style={{ position: 'absolute', top: '15%', left: '0', width: '100%', textAlign: 'center', color: 'rgba(255,255,255,0.8)', fontSize: '0.9rem', fontWeight: 500 }}>
-                                    Hold Steady (Auto-focusing...)
+                                    Tap to focus • Hold steady...
                                 </div>
                                 {isFlashActive && <div className="camera-flash" />}
                             </div>
@@ -691,8 +721,8 @@ export default function MarkTest() {
                                         const btn = e.currentTarget;
                                         btn.disabled = true;
 
-                                        // 300ms delay to allow physical stabilization and focus to settle
-                                        await new Promise(r => setTimeout(r, 300));
+                                        // Phase 1: 400ms delay to allow physical stabilization and focus to settle
+                                        await new Promise(r => setTimeout(r, 400));
 
                                         if (!videoRef || videoRef.videoWidth === 0) {
                                             btn.disabled = false;
@@ -762,14 +792,20 @@ export default function MarkTest() {
                                                 setIsProcessing(true);
                                                 setProcessingStatus(`Enhancing ${capturedImages.length} image${capturedImages.length !== 1 ? 's' : ''}...`);
 
-                                                // Sequential Pipeline: Enhance each camera image one by one to prevent memory spikes in bulk marking
+                                                // Phase 2/3/4: Enhance each camera image one by one using Web Worker to prevent memory spikes
                                                 const imageObjects = [];
                                                 for (let idx = 0; idx < capturedImages.length; idx++) {
                                                     const img = capturedImages[idx];
                                                     setProcessingStatus(`Enhancing image ${idx + 1} of ${capturedImages.length}...`);
                                                     await new Promise(r => setTimeout(r, 10)); // UI tick
-                                                    const enhanced = await applyDocScanFilter(img).catch(() => img);
-                                                    imageObjects.push({ base64: enhanced, label: `Photo ${idx + 1}` });
+                                                    let enhancedBase64 = img;
+                                                    try {
+                                                        const result = await processForVLM(img, true); // Use faint-text assist
+                                                        enhancedBase64 = await blobToBase64(result.blob);
+                                                    } catch (err) {
+                                                        console.error("Worker enhancement failed:", err);
+                                                    }
+                                                    imageObjects.push({ base64: enhancedBase64, label: `Photo ${idx + 1}` });
                                                 }
 
                                                 const allBase64 = imageObjects.map(io => io.base64);

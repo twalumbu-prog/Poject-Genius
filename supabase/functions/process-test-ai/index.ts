@@ -162,12 +162,25 @@ Deno.serve(async (req: Request) => {
       if (!markingScheme) throw new Error("markingScheme required");
 
       const schemeText = JSON.stringify(markingScheme, null, 2);
+      const questionCount = markingScheme.length;
 
       messages = [
         {
           role: "system",
           content: `You are an expert examiner grading a student's handwritten test script.
 Respond with STRICTLY VALID JSON only — no markdown, no commentary.
+
+CRITICAL RULES:
+1. The marking scheme contains EXACTLY ${questionCount} questions.
+2. You MUST return EXACTLY ${questionCount} objects in the answers array.
+3. NEVER return fewer items.
+4. NEVER stop early.
+5. NEVER omit a question.
+6. If an answer is missing, unclear, or illegible, you MUST still return the object and set:
+   * student_answer: "Unanswered"
+   * is_correct: false
+   * confidence: "Low"
+   * feedback: "Missing from page or illegible"
 
 ══ ANSWER TYPE DETECTION ══
 For each question, first determine HOW the student answered, then extract accordingly:
