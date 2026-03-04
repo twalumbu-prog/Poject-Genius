@@ -284,8 +284,18 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
             "4. SHADED BUBBLES / OMR (Fallback):\n" +
             "   → EXTREMELY CRITICAL: Bubbles are arranged in columns L-to-R: [A] [B] [C] [D].\n" +
             "   → VISUAL ANCHORING: For each question, first locate the PRINTED NUMBER (e.g., \"20.\") on the far left.\n" +
-            "   → Then, trace the horizontal line to find the shaded bubble (A/B/C/D) in THAT EXACT ROW.\n" +
-            "   → Look for cross-marks (X) or solid shading.\n\n" +
+            "   → Then, trace the horizontal line to find the shaded bubble (A/B/C/D) in THAT EXACT ROW.\n\n" +
+            "══ BUBBLE ANATOMY & SHADING LOGIC ══\n" +
+            "- BUBBLES CONTAIN LETTERS: Each circular bubble has a small pre-printed letter (A, B, C, or D) inside it.\n" +
+            "- RAW VISION: You are looking at a raw camera photo. It may be tilted or have shadows.\n" +
+            "- WHAT COUNTS AS SHADED:\n" +
+            "  * The printed letter is obscured by ballpoint pen or pencil.\n" +
+            "  * There is a clear CROSS (X) or TICK (✔) over the bubble.\n" +
+            "  * The bubble is completely filled in/blackened.\n" +
+            "- WHAT IS NOT SHADED:\n" +
+            "  * The bubble is empty EXCEPT for the small pre-printed letter inside it.\n" +
+            "  * Dust or slight shadows that do not obscure the printed letter.\n" +
+            "- AMBIGUITY: If multiple bubbles appear marked, check for scribbles (corrections). List all final marks.\n\n" +
             "══ SPATIAL REASONING RULES ══\n" +
             "- DO NOT guess based on context. Only extract what is VISUALLY PRESENT in the image.\n" +
             "- If multiple bubbles are shaded, list them all (e.g., \"A, B\").\n" +

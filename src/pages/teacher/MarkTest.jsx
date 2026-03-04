@@ -264,7 +264,8 @@ export default function MarkTest() {
                     regWorker.terminate();
 
                     let finalImageBitmap;
-                    let finalBase64 = base64; // Fallback to original
+                    let aiBase64 = base64; // Default to original for AI
+                    let finalBase64 = base64; // Fallback to original for UI
 
                     if (regResponse.page_detected && regResponse.warpedImageData) {
                         // Stage 0 succeeded. Convert warped ImageData back to ImageBitmap
@@ -292,6 +293,25 @@ export default function MarkTest() {
                         // Registration failed or low confidence, recreate bitmap from original
                         const freshBlob = base64ToBlob(base64);
                         finalImageBitmap = await createImageBitmap(freshBlob);
+                    }
+
+                    // --- STAGE 0.7: PREPARE AI IMAGE (RAW VISION) ---
+                    // Even if registration succeeded, we send the original (raw) resized image to AI
+                    // because AI internal models handle perspective better than machine warping.
+                    try {
+                        const MAX_AI_SIZE = 2048;
+                        const aiCanvas = document.createElement('canvas');
+                        const aiCtx = aiCanvas.getContext('2d');
+                        const img = new Image();
+                        await new Promise((res) => { img.onload = res; img.src = base64; });
+
+                        const aiScale = Math.min(1.0, MAX_AI_SIZE / Math.max(img.width, img.height));
+                        aiCanvas.width = img.width * aiScale;
+                        aiCanvas.height = img.height * aiScale;
+                        aiCtx.drawImage(img, 0, 0, aiCanvas.width, aiCanvas.height);
+                        aiBase64 = aiCanvas.toDataURL('image/jpeg', 0.85);
+                    } catch (aiErr) {
+                        console.error('[AI Vision] Failed to resize raw image:', aiErr);
                     }
 
                     const page_confidence = regResponse.page_confidence || 0;
@@ -368,7 +388,8 @@ export default function MarkTest() {
 
                     const payload = {
                         mode: 'mark_script',
-                        image: finalBase64,
+                        image: aiBase64, // SEND RAW VISION TO AI
+                        warped_image: finalBase64, // OPTIONAL: Could send both if needed
                         imageIndex: index,
                         markingScheme: markingScheme.questions,
                         target_questions,
