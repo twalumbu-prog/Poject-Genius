@@ -3,20 +3,32 @@
 export function extractGeometry(imageData) {
     const { width, height } = imageData;
 
-    // 1. Quad Detection (Simplified but functional: find largest bounding box of high-gradient points)
-    const quad = detectPageQuad(imageData);
-    if (!quad) return { success: false, reason: 'NO_PAGE_QUAD' };
+    // 1. Robust Quad Detection
+    const quadResult = detectRobustQuad(imageData);
+    if (!quadResult.success) {
+        console.warn(`[OPR Geometry] Quad detection failed: ${quadResult.reason}`);
+        // Fallback to safe zone for testing, but log it
+        const fallbackQuad = [
+            { x: width * 0.05, y: height * 0.05 },
+            { x: width * 0.95, y: height * 0.05 },
+            { x: width * 0.95, y: height * 0.95 },
+            { x: width * 0.05, y: height * 0.95 }
+        ];
+        return { success: false, reason: quadResult.reason || 'NO_PAGE_QUAD' };
+    }
+
+    const quad = quadResult.quad;
 
     // 2. Perspective Warp
     const TARGET_H = 1800;
     const TARGET_W = 1272;
     const warpedImageData = warpPerspective(imageData, quad, TARGET_W, TARGET_H);
 
-    // 3. Grid Discovery (Projection Profile Analysis)
-    const gridModel = discoverGrid(warpedImageData);
+    // 3. Grid Discovery
+    const gridModel = discoverGridRobust(warpedImageData);
 
-    if (gridModel.confidence < 0.6) {
-        return { success: false, reason: 'LOW_GRID_CONFIDENCE', gridModel };
+    if (gridModel.rows.length === 0 || gridModel.cols.length === 0) {
+        return { success: false, reason: 'GRID_DISCOVERY_FAILED', details: `Rows: ${gridModel.rows.length}, Cols: ${gridModel.cols.length}` };
     }
 
     return {
@@ -24,8 +36,8 @@ export function extractGeometry(imageData) {
         warpedImageData,
         gridModel,
         layoutResult: {
-            regions: gridModel.rows.map((row, i) => ({
-                question_number: i + 1,
+            regions: gridModel.rows.map(row => ({
+                question_number: row.question_number,
                 y: row.y,
                 h: row.h,
                 columns: gridModel.cols
@@ -34,46 +46,138 @@ export function extractGeometry(imageData) {
     };
 }
 
-function detectPageQuad(imageData) {
-    // For production, we'd use a real contour finder. 
-    // Here we return a standard inset quad as a "safe zone" for a well-aligned sheet.
-    const w = imageData.width;
-    const h = imageData.height;
-    return [
-        { x: w * 0.05, y: h * 0.05 },
-        { x: w * 0.95, y: h * 0.05 },
-        { x: w * 0.95, y: h * 0.95 },
-        { x: w * 0.05, y: h * 0.95 }
-    ];
+function detectRobustQuad(imageData) {
+    const { width, height, data } = imageData;
+    const MAX_DIM = 600;
+    const scale = Math.min(1.0, MAX_DIM / Math.max(width, height));
+    const sw = Math.round(width * scale);
+    const sh = Math.round(height * scale);
+
+    const gray = new Uint8Array(sw * sh);
+    for (let y = 0; y < sh; y++) {
+        for (let x = 0; x < sw; x++) {
+            const si = (Math.round(y / scale) * width + Math.round(x / scale)) * 4;
+            gray[y * sw + x] = data[si] * 0.299 + data[si + 1] * 0.587 + data[si + 2] * 0.114;
+        }
+    }
+
+    const blurred = gaussianBlur(gray, sw, sh);
+    const edges = computeSobel(blurred, sw, sh);
+    const contours = findContours(edges, sw, sh);
+
+    let bestQuad = null;
+    let maxArea = 0;
+
+    for (const contour of contours) {
+        const quad = extractQuadCorners(contour);
+        if (!quad) continue;
+        const validation = validateQuad(quad, sw, sh, edges);
+        if (validation.valid && validation.area > maxArea) {
+            maxArea = validation.area;
+            bestQuad = quad.map(p => ({ x: p.x / scale, y: p.y / scale }));
+        }
+    }
+
+    if (bestQuad) return { success: true, quad: bestQuad };
+    return { success: false, reason: 'NO_CONFIDENT_CONTOUR' };
+}
+
+function gaussianBlur(gray, width, height) {
+    const out = new Uint8Array(width * height);
+    for (let y = 1; y < height - 1; y++) {
+        for (let x = 1; x < width - 1; x++) {
+            const i = y * width + x;
+            const sum = gray[i] * 4 + gray[i - 1] * 2 + gray[i + 1] * 2 + gray[i - width] * 2 + gray[i + width] * 2 + gray[i - width - 1] + gray[i - width + 1] + gray[i + width - 1] + gray[i + width + 1];
+            out[i] = sum / 16;
+        }
+    }
+    return out;
+}
+
+function computeSobel(gray, width, height) {
+    const edge = new Uint8Array(width * height);
+    for (let y = 1; y < height - 1; y++) {
+        for (let x = 1; x < width - 1; x++) {
+            const i = y * width + x;
+            const gx = -1 * gray[i - width - 1] + 1 * gray[i - width + 1] - 2 * gray[i - 1] + 2 * gray[i + 1] - 1 * gray[i + width - 1] + 1 * gray[i + width + 1];
+            const gy = -1 * gray[i - width - 1] - 2 * gray[i - width] - 1 * gray[i - width + 1] + 1 * gray[i + width - 1] + 2 * gray[i + width] + 1 * gray[i + width + 1];
+            edge[i] = (Math.abs(gx) + Math.abs(gy)) > 120 ? 255 : 0;
+        }
+    }
+    return edge;
+}
+
+function findContours(edgeMap, width, height) {
+    const visited = new Uint8Array(width * height);
+    const contours = [];
+    const dx = [1, 1, 0, -1, -1, -1, 0, 1];
+    const dy = [0, 1, 1, 1, 0, -1, -1, -1];
+
+    for (let y = 1; y < height - 1; y++) {
+        for (let x = 1; x < width - 1; x++) {
+            const idx = y * width + x;
+            if (edgeMap[idx] === 255 && visited[idx] === 0) {
+                const contour = [];
+                let currX = x, currY = y, dir = 7;
+                let startX = currX, startY = currY;
+                let limit = 5000;
+                while (limit-- > 0) {
+                    contour.push({ x: currX, y: currY });
+                    visited[currY * width + currX] = 1;
+                    let nextDir = -1;
+                    for (let i = 0; i < 8; i++) {
+                        const testDir = (dir + 5 + i) % 8;
+                        const nx = currX + dx[testDir], ny = currY + dy[testDir];
+                        if (nx >= 0 && nx < width && ny >= 0 && ny < height && edgeMap[ny * width + nx] === 255) {
+                            nextDir = testDir; break;
+                        }
+                    }
+                    if (nextDir === -1) break;
+                    currX += dx[nextDir]; currY += dy[nextDir]; dir = nextDir;
+                    if (currX === startX && currY === startY) break;
+                }
+                if (contour.length > 100) contours.push(contour);
+            }
+        }
+    }
+    return contours;
+}
+
+function extractQuadCorners(contour) {
+    let tl = contour[0], tr = contour[0], bl = contour[0], br = contour[0];
+    let minSum = Infinity, maxSum = -Infinity, minDiff = Infinity, maxDiff = -Infinity;
+    for (const p of contour) {
+        const sum = p.x + p.y, diff = p.x - p.y;
+        if (sum < minSum) { minSum = sum; tl = p; }
+        if (sum > maxSum) { maxSum = sum; br = p; }
+        if (diff < minDiff) { minDiff = diff; bl = p; }
+        if (diff > maxDiff) { maxDiff = diff; tr = p; }
+    }
+    return [tl, tr, br, bl];
+}
+
+function validateQuad(quad, width, height) {
+    const [tl, tr, br, bl] = quad;
+    const area = 0.5 * Math.abs((tl.x * tr.y - tr.x * tl.y) + (tr.x * br.y - br.x * tr.y) + (br.x * bl.y - bl.x * br.y) + (bl.x * tl.y - tl.x * bl.y));
+    const imgArea = width * height;
+    if (area < imgArea * 0.25) return { valid: false };
+    return { valid: true, area };
 }
 
 function warpPerspective(src, srcQuad, dstW, dstH) {
     const dstQuad = [{ x: 0, y: 0 }, { x: dstW, y: 0 }, { x: dstW, y: dstH }, { x: 0, y: dstH }];
     const invMat = getPerspectiveTransform(dstQuad, srcQuad);
-
     const dstD = new Uint8ClampedArray(dstW * dstH * 4);
-    const srcW = src.width;
-    const srcH = src.height;
-    const srcD = src.data;
-
-    if (srcD.length === 0) {
-        console.error('[OPR Geometry] Source data is empty');
-        return new ImageData(dstD, dstW, dstH);
-    }
-
+    const srcW = src.width, srcH = src.height, srcD = src.data;
     for (let y = 0; y < dstH; y++) {
         for (let x = 0; x < dstW; x++) {
             const den = invMat[6] * x + invMat[7] * y + 1;
             const sx = Math.round((invMat[0] * x + invMat[1] * y + invMat[2]) / den);
             const sy = Math.round((invMat[3] * x + invMat[4] * y + invMat[5]) / den);
-
             const i = (y * dstW + x) * 4;
             if (sx >= 0 && sx < srcW && sy >= 0 && sy < srcH) {
                 const si = (sy * srcW + sx) * 4;
-                dstD[i] = srcD[si];
-                dstD[i + 1] = srcD[si + 1];
-                dstD[i + 2] = srcD[si + 2];
-                dstD[i + 3] = 255;
+                dstD[i] = srcD[si]; dstD[i + 1] = srcD[si + 1]; dstD[i + 2] = srcD[si + 2]; dstD[i + 3] = 255;
             } else {
                 dstD[i] = dstD[i + 1] = dstD[i + 2] = 255; dstD[i + 3] = 255;
             }
@@ -83,13 +187,10 @@ function warpPerspective(src, srcQuad, dstW, dstH) {
 }
 
 function getPerspectiveTransform(src, dst) {
-    const a = [];
-    const b = [];
+    const a = [], b = [];
     for (let i = 0; i < 4; i++) {
-        a.push([src[i].x, src[i].y, 1, 0, 0, 0, -src[i].x * dst[i].x, -src[i].y * dst[i].x]);
-        b.push(dst[i].x);
-        a.push([0, 0, 0, src[i].x, src[i].y, 1, -src[i].x * dst[i].y, -src[i].y * dst[i].y]);
-        b.push(dst[i].y);
+        a.push([src[i].x, src[i].y, 1, 0, 0, 0, -src[i].x * dst[i].x, -src[i].y * dst[i].x]); b.push(dst[i].x);
+        a.push([0, 0, 0, src[i].x, src[i].y, 1, -src[i].x * dst[i].y, -src[i].y * dst[i].y]); b.push(dst[i].y);
     }
     return solve(a, b);
 }
@@ -99,8 +200,7 @@ function solve(A, b) {
     for (let i = 0; i < n; i++) {
         let max = i;
         for (let j = i + 1; j < n; j++) if (Math.abs(A[j][i]) > Math.abs(A[max][i])) max = j;
-        [A[i], A[max]] = [A[max], A[i]];
-        [b[i], b[max]] = [b[max], b[i]];
+        [A[i], A[max]] = [A[max], A[i]];[b[i], b[max]] = [b[max], b[i]];
         for (let j = i + 1; j < n; j++) {
             const c = A[j][i] / A[i][i];
             for (let k = i; k < n; k++) A[j][k] -= c * A[i][k];
@@ -116,31 +216,31 @@ function solve(A, b) {
     return x;
 }
 
-function discoverGrid(imageData) {
+function discoverGridRobust(imageData) {
     const { width, height, data } = imageData;
     const horizontalProfile = new Float32Array(height);
-
-    // 1. Horizontal Projection (Darkness per row)
     for (let y = 0; y < height; y++) {
         let rowSum = 0;
         for (let x = 0; x < width; x++) {
             const i = (y * width + x) * 4;
-            const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-            rowSum += (255 - luma); // Invert
+            const l = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+            rowSum += (255 - l);
         }
         horizontalProfile[y] = rowSum / width;
     }
 
-    // 2. Peak Detection for Rows
     const rows = [];
-    const threshold = 30; // Min darkness for a row
-    for (let y = 1; y < height - 1; y++) {
+    const threshold = 25;
+    let lastY = -100;
+    for (let y = 100; y < height - 100; y++) {
         if (horizontalProfile[y] > threshold && horizontalProfile[y] > horizontalProfile[y - 1] && horizontalProfile[y] > horizontalProfile[y + 1]) {
-            rows.push({ y, h: 40 }); // Fixed height for now
+            if (y - lastY > 30) {
+                rows.push({ y, h: 40, question_number: rows.length + 1 });
+                lastY = y;
+            }
         }
     }
 
-    // 3. Vertical Projection for Columns (within detected rows)
     const cols = [];
     if (rows.length > 0) {
         const verticalProfile = new Float32Array(width);
@@ -148,23 +248,21 @@ function discoverGrid(imageData) {
             let colSum = 0;
             for (const row of rows) {
                 const i = (row.y * width + x) * 4;
-                const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-                colSum += (255 - luma);
+                const l = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+                colSum += (255 - l);
             }
             verticalProfile[x] = colSum / rows.length;
         }
-
-        for (let x = 1; x < width - 1; x++) {
-            if (verticalProfile[x] > threshold && verticalProfile[x] > verticalProfile[x - 1] && verticalProfile[x] > verticalProfile[x + 1]) {
-                cols.push({ x, w: 40, label: String.fromCharCode(65 + cols.length) });
-                if (cols.length >= 5) break;
+        let lastX = -100;
+        for (let x = 100; x < width - 100; x++) {
+            if (verticalProfile[x] > 20 && verticalProfile[x] > verticalProfile[x - 1] && verticalProfile[x] > verticalProfile[x + 1]) {
+                if (x - lastX > 60) {
+                    cols.push({ x, w: 40, label: String.fromCharCode(65 + cols.length) });
+                    lastX = x;
+                    if (cols.length >= 5) break;
+                }
             }
         }
     }
-
-    return {
-        rows,
-        cols,
-        confidence: rows.length > 10 ? 0.9 : 0.4
-    };
+    return { rows, cols };
 }

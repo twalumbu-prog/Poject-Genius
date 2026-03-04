@@ -34,20 +34,23 @@ export function classifyStates(candidates) {
     const paperWhite = baselineIntensities[Math.floor(baselineIntensities.length * 0.75)]; // 75th percentile is paper
     console.log(`[OPR Classification] Detected Paper Baseline: ${Math.round(paperWhite)}`);
 
-    // 2. Compute dark/light deltas
+    // 2. Compute adaptive thresholds
+    const filledDelta = 65; // Minimum darkness delta from paper to be "filled"
+    const erasureDelta = 35; // Minimum darkness delta to be "erasure"
+
     return candidates.map(c => {
         const delta = paperWhite - c.stats.mean;
         const fillRatio = c.stats.darkPixels / (30 * 30);
 
         let state = 'EMPTY';
-        let confidence = 0.9;
+        let confidence = 0.95;
 
-        if (delta > 80 && fillRatio > 0.4) {
+        if (delta > filledDelta && fillRatio > 0.35) {
             state = 'FILLED';
-        } else if (delta > 30 && fillRatio > 0.15) {
+        } else if (delta > erasureDelta && fillRatio > 0.15) {
             state = 'ERASURE_SUSPECT';
             confidence = 0.6;
-        } else if (delta < 15) {
+        } else {
             state = 'EMPTY';
         }
 
@@ -65,7 +68,8 @@ function analyzePatch(data, w, h, cx, cy, size) {
     let sum = 0;
     let darkPixels = 0;
     const half = Math.floor(size / 2);
-    const darkThreshold = 180;
+    // Dark threshold is relative to 255. In a dark room, paper might be 150.
+    const darkThreshold = 140;
 
     for (let y = cy - half; y < cy + half; y++) {
         for (let x = cx - half; x < cx + half; x++) {
