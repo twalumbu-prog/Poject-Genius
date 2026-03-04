@@ -427,6 +427,7 @@ export default function MarkTest() {
                                 student_answer: aiAns?.student_answer || '',
                                 is_correct: aiAns ? aiAns.is_correct : false,
                                 feedback: aiAns?.feedback || (aiAns ? '' : 'Not found in extraction'),
+                                rationale: aiAns?.rationale || '',
                                 confidence: aiAns?.confidence || 'Low',
                                 topic: q.topic,
                                 _debug: aiAns?._debug || {} // Include hybrid routing info
@@ -1354,6 +1355,11 @@ export default function MarkTest() {
                                                         <span className={`status - badge ${ans.is_correct ? 'correct' : 'incorrect'} `}>
                                                             {ans.is_correct ? 'Correct' : 'Incorrect'}
                                                         </span>
+                                                        {ans.confidence === 'Low' && (
+                                                            <span style={{ fontSize: '0.7rem', fontWeight: 600, color: '#92400e', background: '#fef3c7', padding: '3px 8px', borderRadius: '12px', border: '1px solid #fcd34d' }}>
+                                                                Review Required
+                                                            </span>
+                                                        )}
                                                     </div>
                                                 </div>
                                                 <div className="review-item-body">
@@ -1368,6 +1374,11 @@ export default function MarkTest() {
                                                     {ans.feedback && (
                                                         <div className="review-note">
                                                             <strong>AI Note:</strong> {ans.feedback}
+                                                        </div>
+                                                    )}
+                                                    {ans.rationale && (
+                                                        <div className="review-note rationale" style={{ background: '#f0f9ff', color: '#0369a1', borderLeftColor: '#0ea5e9', borderLeftWidth: '4px', borderLeftStyle: 'solid', marginTop: '4px' }}>
+                                                            <strong>AI Rationale:</strong> {ans.rationale}
                                                         </div>
                                                     )}
                                                 </div>

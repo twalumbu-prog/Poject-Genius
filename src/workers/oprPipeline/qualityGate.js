@@ -18,7 +18,7 @@ export function checkQuality(imageData) {
     console.log(`[OPR Quality] Blur: ${Math.round(blurScore)}, Glare: ${(glareScore * 100).toFixed(2)}%`);
 
     const ACCEPTABLE_BLUR = 80; // Standard threshold
-    const MAX_GLARE_RATIO = 0.05; // 5% of pixels
+    const MAX_GLARE_RATIO = 0.15; // Increased from 0.05 to be less sensitive
 
     let accepted = true;
     let reason = '';
@@ -63,8 +63,9 @@ function detectGlare(data, w, h) {
         const r = data[i];
         const g = data[i + 1];
         const b = data[i + 2];
-        // Glare is often pure white (255, 255, 255)
-        if (r > 240 && g > 240 && b > 240) {
+        // Glare is extreme white. 240 is too low (common paper value). 
+        // 252+ is more likely actual glare/reflection.
+        if (r > 250 && g > 250 && b > 250) {
             brightCount++;
         }
     }

@@ -311,6 +311,7 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
             "      \"student_answer\": \"string\",\n" +
             "      \"is_correct\": true,\n" +
             "      \"feedback\": \"string (empty if correct, explanation if wrong)\",\n" +
+            "      \"rationale\": \"string (explain exactly what visual evidence led to this answer - e.g. 'I see a faint marking in bubble B but bubble A is clearly shaded dark')\",\n" +
             "      \"confidence\": \"High|Medium|Low\"\n" +
             "    }]\n" +
             "  }]\n" +
@@ -399,6 +400,7 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
             is_correct: false,
             confidence: "Low",
             feedback: "Question omitted by AI engine during extraction.",
+            rationale: "AI did not return this question in the primary extraction pass.",
             _repaired: true // flag for the frontend to know
           });
         }
