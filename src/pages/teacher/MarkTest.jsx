@@ -228,22 +228,33 @@ export default function MarkTest() {
 
                     const studentData = resultsArray[0];
                     if (studentData) {
+                        let unmapped = [];
+                        let mappedAnswers = markingScheme.questions.map(q => {
+                            const aiAns = studentData.answers?.find(a => String(a.question_number).trim() === String(q.question_number).trim());
+                            return {
+                                question_number: q.question_number,
+                                student_answer: aiAns?.student_answer || '',
+                                is_correct: aiAns ? aiAns.is_correct : false,
+                                feedback: aiAns?.feedback || (aiAns ? '' : 'Not found in extraction'),
+                                confidence: aiAns?.confidence || 'Low',
+                                topic: q.topic
+                            };
+                        });
+
+                        if (studentData.answers) {
+                            studentData.answers.forEach(a => {
+                                const mapped = markingScheme.questions.some(q => String(q.question_number).trim() === String(a.question_number).trim());
+                                if (!mapped) unmapped.push(a);
+                            });
+                        }
+
                         parsedBatch[index] = {
                             studentName: studentData.studentName || '',
                             studentId: studentData.student_id || '',
                             grade: studentData.grade || '',
                             imageIndex: index,
-                            studentAnswers: markingScheme.questions.map(q => {
-                                const aiAns = studentData.answers?.find(a => a.question_number === q.question_number);
-                                return {
-                                    question_number: q.question_number,
-                                    student_answer: aiAns?.student_answer || '',
-                                    is_correct: aiAns ? aiAns.is_correct : false,
-                                    feedback: aiAns?.feedback || (aiAns ? '' : 'Not found in extraction'),
-                                    confidence: aiAns?.confidence || 'Low',
-                                    topic: q.topic
-                                };
-                            })
+                            studentAnswers: mappedAnswers,
+                            unmappedAnswers: unmapped
                         };
                     }
                     advanceScanProgress();
@@ -764,8 +775,9 @@ export default function MarkTest() {
                                         // Draw only the cropped portion, scaling it in the same pass
                                         ctx.drawImage(videoRef, cropX, cropY, cropWidth, cropHeight, 0, 0, targetWidth, targetHeight);
 
-                                        // Aggressive JPEG compression for ~200-300kb sizes
-                                        const rawBase64 = canvas.toDataURL('image/jpeg', 0.8);
+                                        // Extract at MAXIMUM quality (1.0) to prevent double-compression generation loss.
+                                        // The Web Worker will handle the final 0.75 compression pass later.
+                                        const rawBase64 = canvas.toDataURL('image/jpeg', 1.0);
 
                                         // Push to state array
                                         setCapturedImages(prev => [...prev, rawBase64]);
@@ -1090,6 +1102,21 @@ export default function MarkTest() {
                                             </div>
                                         ))}
                                     </div>
+
+                                    {reviewData.unmappedAnswers?.length > 0 && (
+                                        <div className="unmapped-answers-dump" style={{ marginTop: '20px', padding: '16px', background: '#fdf2f8', border: '1px solid #fbcfe8', borderRadius: '8px' }}>
+                                            <h4 style={{ color: '#be185d', marginBottom: '8px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                <AlertCircle size={16} />
+                                                Unmapped AI Answers ({reviewData.unmappedAnswers.length})
+                                            </h4>
+                                            <p style={{ fontSize: '0.8rem', color: '#831843', marginBottom: '12px' }}>
+                                                The AI extracted the following answers but could not match them to a question number in the marking scheme. These were ignored during grading. Use this dump to diagnose what it saw.
+                                            </p>
+                                            <pre style={{ fontSize: '0.75rem', color: '#9d174d', background: '#fce7f3', padding: '12px', borderRadius: '6px', overflowX: 'auto', whiteSpace: 'pre-wrap' }}>
+                                                {JSON.stringify(reviewData.unmappedAnswers, null, 2)}
+                                            </pre>
+                                        </div>
+                                    )}
                                 </>
                             )}
                         </div>

@@ -176,7 +176,8 @@ CRITICAL RULES:
 3. NEVER return fewer items.
 4. NEVER stop early.
 5. NEVER omit a question.
-6. If an answer is missing, unclear, or illegible, you MUST still return the object and set:
+6. The \`question_number\` MUST be an integer exactly matching the scheme. Do NOT output strings like "1", output 1.
+7. If an answer is missing, unclear, or illegible, you MUST still return the object and set:
    * student_answer: "Unanswered"
    * is_correct: false
    * confidence: "Low"

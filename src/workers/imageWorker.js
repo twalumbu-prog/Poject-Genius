@@ -27,8 +27,8 @@ self.onmessage = async (e) => {
         const w = width;
         const h = height;
 
-        // Phase 2 / Step 2: Mild contrast (1.15-1.25)
-        const contrast = 1.20;
+        // Phase 2 / Step 2: Very mild contrast (1.10) to preserve natural VLM context
+        const contrast = 1.10;
         const intercept = 128 * (1 - contrast);
 
         // Prep arrays for adaptive thresholding if needed
@@ -61,25 +61,8 @@ self.onmessage = async (e) => {
             }
         }
 
-        // Phase 2 / Step 3: Mild sharpening (Unsharp Mask equivalent)
+        // Removed Phase 2 / Step 3 (Unsharp mask) entirely because it amplified noise artifacts before VLM extraction
         const outputData = new Uint8ClampedArray(d);
-        // Using a 3x3 gentle kernel: (Center 4.4, orthogonals -0.85)
-        for (let y = 1; y < h - 1; y++) {
-            for (let x = 1; x < w - 1; x++) {
-                const dstOff = (y * w + x) * 4;
-
-                for (let c = 0; c < 3; c++) {
-                    const top = ((y - 1) * w + x) * 4 + c;
-                    const bottom = ((y + 1) * w + x) * 4 + c;
-                    const left = (y * w + (x - 1)) * 4 + c;
-                    const right = (y * w + (x + 1)) * 4 + c;
-                    const center = dstOff + c;
-
-                    let val = (d[center] * 4.4) - ((d[top] + d[bottom] + d[left] + d[right]) * 0.85);
-                    outputData[dstOff + c] = val;
-                }
-            }
-        }
 
         // Phase 2 / Step 4: Conditional faint-text assist (Bradley)
         if (faintTextAssist) {
