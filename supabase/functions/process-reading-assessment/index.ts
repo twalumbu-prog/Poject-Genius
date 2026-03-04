@@ -28,7 +28,7 @@ function cleanAndParseJson(text: string) {
 }
 
 async function callGeminiAudio(audioData: string, mimeType: string, passageText: string, apiKey: string) {
-    const model = "gemini-2.0-flash-001";
+    const model = "gemini-2.5-flash";
     const payload = {
         contents: [{
             parts: [
@@ -118,7 +118,7 @@ Deno.serve(async (req: Request) => {
 
         if (mode === "generate_passage") {
             const { grade, level, length, focus } = genParams;
-            const model = "gemini-2.0-flash-001";
+            const model = "gemini-2.5-flash";
             const prompt = `You are an expert curriculum designer for the Zambian Ministry of Education.
 Generate a reading passage for a ${grade} student.
 Difficulty Level: ${level}
