@@ -303,7 +303,8 @@ export default function MarkTest() {
                     const data = await response.json();
 
                     // --- STAGE D: HYBRID MERGER ---
-                    const mergedResultsArray = mergeHybridAnswers(omrResults, data, markingScheme.questions);
+                    const hybridPayload = mergeHybridAnswers(omrResults, data, markingScheme.questions);
+                    const mergedResultsArray = hybridPayload.results ? hybridPayload.results : [hybridPayload];
 
                     const studentData = mergedResultsArray[0];
                     if (studentData) {
@@ -367,12 +368,14 @@ export default function MarkTest() {
                             unmappedAnswers: unmapped,
                             // Extracted edge server metadata + Stage B metadata
                             _debugMeta: {
-                                raw_llm_count: data._debugMeta?.raw_llm_count || 0,
-                                repaired_count: data._debugMeta?.repaired_count || 0,
+                                raw_llm_count: data.raw_llm_count || 0,
+                                repaired_count: data.repaired_count || 0,
                                 duplicate_count: duplicateWarnings.length,
-                                validation_passed: data._debugMeta?.validation_passed || false,
+                                validation_passed: data.validation_passed || false,
                                 omr_layout: omrResponse.layoutResult,
-                                omr_confidence: Object.values(omrResults).reduce((acc, obj) => acc + (obj.confidence || 0), 0) / (omrResults.length || 1)
+                                omr_confidence: Object.values(omrResults).reduce((acc, obj) => acc + (obj.confidence || 0), 0) / (omrResults.length || 1),
+                                hybrid_omr_used: hybridPayload._debugMeta?.omr_used || 0,
+                                hybrid_ocr_used: hybridPayload._debugMeta?.ocr_used || 0
                             }
                         };
                     }

@@ -4,7 +4,7 @@
  * into a single unified array. Priorities: Clear OMR > Confident OCR > Manual Review.
  */
 
-export function mergeHybridResults(omrResults, ocrApiResult, markingScheme) {
+export function mergeHybridAnswers(omrResults, ocrApiResult, markingScheme) {
     if (!markingScheme || !Array.isArray(markingScheme)) {
         throw new Error("[HybridMerger] markingScheme is required");
     }
