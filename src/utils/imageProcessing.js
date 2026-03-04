@@ -10,7 +10,7 @@ import PdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 pdfjsLib.GlobalWorkerOptions.workerSrc = PdfjsWorker;
 
 const PDF_RENDER_SCALE = 1.8; // ~1620px wide for an A4 page — good for OCR
-const MAX_IMAGE_DIM = 1920; // Increased for better OCR resolution since we're sequential now
+const MAX_IMAGE_DIM = 1600; // Balanced for OCR accuracy vs payload size (helps prevent "load failed" on mobile)
 
 /**
  * Applies a robust contrast-boost filter designed for documents.
@@ -111,7 +111,7 @@ export async function applyDocScanFilter(base64Image) {
             }
 
             ctx.putImageData(imageData, 0, 0);
-            resolve(canvas.toDataURL('image/jpeg', 0.82));
+            resolve(canvas.toDataURL('image/jpeg', 0.75));
         };
         img.onerror = () => resolve(base64Image);
         img.src = base64Image;

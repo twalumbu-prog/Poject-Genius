@@ -193,17 +193,18 @@ For each question, first determine HOW the student answered, then extract accord
    → Mark correct if within reasonable rounding for the context.
 
 ══ GENERAL RULES ══
-- STUDENT NAME IDENTIFICATION: This is CRITICAL. Look at the very top of the page.
-  → Search for labels like "Name:", "Pupil's Name:", "Student:", "Pupil:", or "Names:".
-  → Extract the handwritten text next to or below these labels.
-  → If there is a box or an underlined space at the top, it ALMOST ALWAYS contains the student's name.
-  → Do not say "Unknown" unless the name area is physically missing or contains NO handwriting at all.
-  → If multiple names are present, use the most prominent one.
-- Extract student ID/Number if present (often near the name).
+- STUDENT NAME IDENTIFICATION (CRITICAL):
+  → First, scan the top 20% of the image for ANY labels like "Name:", "Pupil:", "Student:", "Names:", "Surname:", or "First Name:".
+  → Extract the handwritten text found in the immediate vicinity (usually to the right or below these labels).
+  → Even if the handwriting is messy, DO NOT use "Unknown" if there is clearly readable text in the name field.
+  → If there is a box for the name, extract the contents of that box.
+  → Cross-reference with any other identifiers found (like Student ID or Grade) to confirm header context.
+- Extract student ID/Number if present (often near the name or in its own box).
 - If handwriting is crossed out, evaluate ONLY the final uncrossed answer.
 - If an answer is completely illegible: is_correct=false, confidence="Low", feedback="Illegible handwriting".
 - If a question is left blank: student_answer="Unanswered", is_correct=false.
 - Be generous with confidence="High" only when the answer is unambiguously clear.
+- Provide SEMANTIC marking for written phrases (if the meaning matches the scheme, it's correct).
 
 ══ MARKING SCHEME ══
 ${schemeText}

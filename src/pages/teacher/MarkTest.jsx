@@ -175,6 +175,16 @@ export default function MarkTest() {
             setProcessingStatus(`Marking script ${i + 1} of ${total}${total > 1 ? `: ${label}` : ''}...`);
 
             try {
+                const payload = {
+                    mode: 'mark_script',
+                    image: base64,
+                    imageIndex: i,
+                    markingScheme: markingScheme.questions,
+                    geminiKey: import.meta.env.VITE_GEMINI_API_KEY
+                };
+                const payloadSize = Math.round(JSON.stringify(payload).length / 1024);
+                console.log(`[AI Scan] Sending script ${i + 1} (${label}). Size: ${payloadSize}KB`);
+
                 const response = await fetch(
                     `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-test-ai`,
                     {
@@ -184,13 +194,7 @@ export default function MarkTest() {
                             'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
                             'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
                         },
-                        body: JSON.stringify({
-                            mode: 'mark_script',
-                            image: base64,
-                            imageIndex: i,
-                            markingScheme: markingScheme.questions,
-                            geminiKey: import.meta.env.VITE_GEMINI_API_KEY
-                        })
+                        body: JSON.stringify(payload)
                     }
                 );
 
