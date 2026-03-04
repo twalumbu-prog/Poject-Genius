@@ -10,14 +10,11 @@ import PdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 pdfjsLib.GlobalWorkerOptions.workerSrc = PdfjsWorker;
 
 const PDF_RENDER_SCALE = 1.8; // ~1620px wide for an A4 page — good for OCR
-const MAX_IMAGE_DIM = 1600; // cap for camera/upload images to stay under 546 OOM limit
+const MAX_IMAGE_DIM = 1920; // Increased for better OCR resolution since we're sequential now
 
 /**
  * Applies a robust contrast-boost filter designed for documents.
- * Unlike hard binary thresholding, this preserves nuance while making text pop.
- * Includes a "panic" check: if the result is solid white (common in overexposed photos),
- * it returns the original image instead.
- *
+ * Uses a dynamic histogram-based stretch to ensure text is black and background is white.
  * @param {string} base64Image
  * @returns {Promise<string>}
  */
@@ -43,41 +40,80 @@ export async function applyDocScanFilter(base64Image) {
             const imageData = ctx.getImageData(0, 0, width, height);
             const d = imageData.data;
 
-            let whiteCount = 0;
-            const totalPixels = width * height;
-
+            // 1. Calculate Histogram
+            const hist = new Uint32Array(256);
             for (let i = 0; i < d.length; i += 4) {
-                // Standard grayscale luminosity
-                let gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-
-                // Robust contrast boost (Softer than previous binary threshold)
-                // Maps 50-200 range to 0-255 roughly, with smoothing
-                if (gray > 185) {
-                    gray = 255;
-                } else if (gray < 75) {
-                    gray = 0;
-                } else {
-                    // Linear stretch: (val - min) * (newMax / (max - min))
-                    gray = Math.round((gray - 75) * (255 / 110));
-                }
-
-                if (gray >= 250) whiteCount++;
-
-                d[i] = d[i + 1] = d[i + 2] = gray;
+                const gray = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
+                hist[gray]++;
             }
 
-            // SAFETY CHECK: If > 99% of the image is pure white, the filter failed
-            // (likely the original was already quite bright). Return original.
-            if (whiteCount > totalPixels * 0.99) {
-                console.warn('Doc scan filter resulted in blank image. Falling back to raw capture.');
+            // 2. Find Black/White points (Percentile based)
+            let blackPoint = 0;
+            let whitePoint = 255;
+            const totalPixels = width * height;
+
+            // Black point: darker 5% (to crush shadows/faint text to black)
+            let count = 0;
+            for (let i = 0; i < 256; i++) {
+                count += hist[i];
+                if (count > totalPixels * 0.05) {
+                    blackPoint = i;
+                    break;
+                }
+            }
+
+            // White point: lighter 25% (very aggressive to push paper to white)
+            count = 0;
+            for (let i = 255; i >= 0; i--) {
+                count += hist[i];
+                if (count > totalPixels * 0.25) {
+                    whitePoint = i;
+                    break;
+                }
+            }
+
+            // Ensure points aren't too close to prevent extreme noise amplification
+            if (whitePoint - blackPoint < 60) {
+                blackPoint = Math.max(0, blackPoint - 30);
+                whitePoint = Math.min(255, whitePoint + 30);
+            }
+
+            // 3. Apply Contrast Stretch + Gamma Adjustment
+            const range = Math.max(1, whitePoint - blackPoint);
+            let whitePixelCount = 0;
+
+            for (let i = 0; i < d.length; i += 4) {
+                let gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+
+                // Stretch: (val - black) / range * 255
+                gray = ((gray - blackPoint) / range) * 255;
+
+                // Push to extremes more aggressively
+                if (gray > 210) gray = 255;
+                else if (gray < 80) gray = 0;
+                else {
+                    // Smooth s-curve in middle
+                    const normalized = gray / 255;
+                    gray = (Math.pow(normalized, 1.2) * 255); // Gentler curve
+                }
+
+                const final = Math.min(255, Math.max(0, Math.round(gray)));
+                if (final >= 250) whitePixelCount++;
+
+                d[i] = d[i + 1] = d[i + 2] = final;
+            }
+
+            // Safety check: if image became > 99% white, fallback to raw
+            if (whitePixelCount > totalPixels * 0.995) {
+                console.warn('Filter too aggressive, falling back to raw image.');
                 resolve(base64Image);
                 return;
             }
 
             ctx.putImageData(imageData, 0, 0);
-            resolve(canvas.toDataURL('image/jpeg', 0.85));
+            resolve(canvas.toDataURL('image/jpeg', 0.82));
         };
-        img.onerror = () => resolve(base64Image); // Fallback on error
+        img.onerror = () => resolve(base64Image);
         img.src = base64Image;
     });
 }

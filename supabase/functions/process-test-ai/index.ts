@@ -193,7 +193,13 @@ For each question, first determine HOW the student answered, then extract accord
    → Mark correct if within reasonable rounding for the context.
 
 ══ GENERAL RULES ══
-- Extract student name and ID from the top of the paper. If unreadable, use "Unknown".
+- STUDENT NAME IDENTIFICATION: This is CRITICAL. Look at the very top of the page.
+  → Search for labels like "Name:", "Pupil's Name:", "Student:", "Pupil:", or "Names:".
+  → Extract the handwritten text next to or below these labels.
+  → If there is a box or an underlined space at the top, it ALMOST ALWAYS contains the student's name.
+  → Do not say "Unknown" unless the name area is physically missing or contains NO handwriting at all.
+  → If multiple names are present, use the most prominent one.
+- Extract student ID/Number if present (often near the name).
 - If handwriting is crossed out, evaluate ONLY the final uncrossed answer.
 - If an answer is completely illegible: is_correct=false, confidence="Low", feedback="Illegible handwriting".
 - If a question is left blank: student_answer="Unanswered", is_correct=false.
