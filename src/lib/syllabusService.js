@@ -141,23 +141,37 @@ export const SyllabusService = {
         if (!subjectSyllabus) return null;
 
         const allTopics = Object.values(subjectSyllabus).flat();
-        const topic = allTopics.find(t => t.id === topicId);
-        if (!topic || !topic.subtopics) return null;
+        let topic = allTopics.find(t => t.id === topicId);
 
-        // 1. Try exact code match
-        const codeMatch = topic.subtopics.find(s => s.code && s.code.toLowerCase() === subtopicName.toLowerCase());
-        if (codeMatch) return codeMatch.id;
+        // --- Try within the specific topic first ---
+        if (topic && topic.subtopics) {
+            // 1. Try exact code match
+            const codeMatch = topic.subtopics.find(s => s.code && s.code.toLowerCase() === subtopicName.toLowerCase());
+            if (codeMatch) return codeMatch.id;
 
-        // 2. Try exact name match
-        const exactMatch = topic.subtopics.find(s => s.name.toLowerCase() === subtopicName.toLowerCase());
-        if (exactMatch) return exactMatch.id;
+            // 2. Try exact name match
+            const exactMatch = topic.subtopics.find(s => s.name.toLowerCase() === subtopicName.toLowerCase());
+            if (exactMatch) return exactMatch.id;
 
-        // 3. Fallback to fuzzy
-        const fuzzyMatch = topic.subtopics.find(s =>
-            s.name.toLowerCase().includes(subtopicName.toLowerCase()) ||
-            subtopicName.toLowerCase().includes(s.name.toLowerCase())
-        );
-        return fuzzyMatch ? fuzzyMatch.id : null;
+            // 3. Try fuzzy
+            const fuzzyMatch = topic.subtopics.find(s =>
+                s.name.toLowerCase().includes(subtopicName.toLowerCase()) ||
+                subtopicName.toLowerCase().includes(s.name.toLowerCase())
+            );
+            if (fuzzyMatch) return fuzzyMatch.id;
+        }
+
+        // --- Fallback: Search ALL subtopics in this subject ---
+        for (const t of allTopics) {
+            if (!t.subtopics) continue;
+            const fuzzySub = t.subtopics.find(s =>
+                s.name.toLowerCase().includes(subtopicName.toLowerCase()) ||
+                subtopicName.toLowerCase().includes(s.name.toLowerCase())
+            );
+            if (fuzzySub) return fuzzySub.id;
+        }
+
+        return null;
     },
 
     /**
@@ -175,21 +189,35 @@ export const SyllabusService = {
             subtopic = t.subtopics.find(s => s.id === subtopicId);
             if (subtopic) break;
         }
-        if (!subtopic || !subtopic.learningOutcomes) return null;
 
-        // 1. Try exact code match
-        const codeMatch = subtopic.learningOutcomes.find(l => l.code && l.code.toLowerCase() === loDescription.toLowerCase());
-        if (codeMatch) return codeMatch.id;
+        // --- Try within the specific subtopic first ---
+        if (subtopic && subtopic.learningOutcomes) {
+            const codeMatch = subtopic.learningOutcomes.find(l => l.code && l.code.toLowerCase() === loDescription.toLowerCase());
+            if (codeMatch) return codeMatch.id;
 
-        // 2. Try exact description match
-        const exactMatch = subtopic.learningOutcomes.find(l => l.description.toLowerCase() === loDescription.toLowerCase());
-        if (exactMatch) return exactMatch.id;
+            const exactMatch = subtopic.learningOutcomes.find(l => l.description.toLowerCase() === loDescription.toLowerCase());
+            if (exactMatch) return exactMatch.id;
 
-        // 3. Fallback to fuzzy
-        const fuzzyMatch = subtopic.learningOutcomes.find(l =>
-            l.description.toLowerCase().includes(loDescription.toLowerCase()) ||
-            loDescription.toLowerCase().includes(l.description.toLowerCase())
-        );
-        return fuzzyMatch ? fuzzyMatch.id : null;
+            const fuzzyMatch = subtopic.learningOutcomes.find(l =>
+                l.description.toLowerCase().includes(loDescription.toLowerCase()) ||
+                loDescription.toLowerCase().includes(l.description.toLowerCase())
+            );
+            if (fuzzyMatch) return fuzzyMatch.id;
+        }
+
+        // --- Fallback: Search ALL learning outcomes in this subject ---
+        for (const t of allTopics) {
+            if (!t.subtopics) continue;
+            for (const st of t.subtopics) {
+                if (!st.learningOutcomes) continue;
+                const fuzzyLo = st.learningOutcomes.find(l =>
+                    l.description.toLowerCase().includes(loDescription.toLowerCase()) ||
+                    loDescription.toLowerCase().includes(l.description.toLowerCase())
+                );
+                if (fuzzyLo) return fuzzyLo.id;
+            }
+        }
+
+        return null;
     }
 };
