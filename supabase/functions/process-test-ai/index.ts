@@ -6,8 +6,8 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
 const GEMINI_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-2.0-flash-exp",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
   "gemini-1.5-pro",
 ];
 
@@ -281,21 +281,21 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
             "   → Extract the handwritten letter (A/B/C/D).\n\n" +
             "3. NUMERIC ANSWER:\n" +
             "   → Extract the number exactly as written.\n\n" +
-            "4. SHADED BUBBLES / OMR (Fallback):\n" +
-            "   → EXTREMELY CRITICAL: Bubbles are arranged in columns L-to-R: [A] [B] [C] [D].\n" +
             "   → VISUAL ANCHORING: For each question, first locate the PRINTED NUMBER (e.g., \"20.\") on the far left.\n" +
-            "   → Then, trace the horizontal line to find the shaded bubble (A/B/C/D) in THAT EXACT ROW.\n\n" +
+            "   → Then, trace the horizontal line to find the shaded bubble in THAT EXACT ROW.\n\n" +
             "══ BUBBLE ANATOMY & SHADING LOGIC ══\n" +
-            "- BUBBLES CONTAIN LETTERS: Each circular bubble has a small pre-printed letter (A, B, C, or D) inside it.\n" +
+            "- BUBBLES CONTAIN LETTERS: Each circular bubble has a small pre-printed letter (A, B, or C) inside it.\n" +
+            "- SOME BUBBLES ARE BLANK: In some formats, the 4th bubble in a group is a BLANK CIRCLE with no letter inside. This corresponds to the 4th option (D).\n" +
             "- RAW VISION: You are looking at a raw camera photo. It may be tilted or have shadows.\n" +
             "- WHAT COUNTS AS SHADED:\n" +
             "  * The printed letter is obscured by ballpoint pen or pencil.\n" +
             "  * There is a clear CROSS (X) or TICK (✔) over the bubble.\n" +
             "  * The bubble is completely filled in/blackened.\n" +
             "- WHAT IS NOT SHADED:\n" +
-            "  * The bubble is empty EXCEPT for the small pre-printed letter inside it.\n" +
+            "  * The bubble is empty EXCEPT for a small pre-printed letter (A/B/C) inside it.\n" +
             "  * Dust or slight shadows that do not obscure the printed letter.\n" +
-            "- AMBIGUITY: If multiple bubbles appear marked, check for scribbles (corrections). List all final marks.\n\n" +
+            "- AMBIGUITY: If multiple bubbles appear marked, check for scribbles (corrections). List all final marks.\n" +
+            "- ANTI-PATTERN BIAS (CRITICAL): Do NOT follow any sequence (e.g., A, B, C, D, A, B...). Every question is independent. If you cannot see a clear mark, set student_answer to \"Unanswered\".\n\n" +
             "══ SPATIAL REASONING RULES ══\n" +
             "- DO NOT guess based on context. Only extract what is VISUALLY PRESENT in the image.\n" +
             "- If multiple bubbles are shaded, list them all (e.g., \"A, B\").\n" +
@@ -313,6 +313,10 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
             "- If a question is left blank: student_answer=\"Unanswered\", is_correct=false.\n" +
             "- Be generous with confidence=\"High\" only when the answer is unambiguously clear.\n" +
             "- Provide SEMANTIC marking for written phrases (if the meaning matches the scheme, it's correct).\n\n" +
+            "══ VERIFICATION LOOP ══\n" +
+            "1. After extracting all answers, re-examine the results for REPEATING PATTERNS (e.g., A, B, C, D, A, B...).\n" +
+            "2. If you find such a pattern, you have likely failed to see the bubbles and are guessing. GO BACK and re-scan the image question-by-question.\n" +
+            "3. If a circle is truly empty, do NOT guess. Mark as \"Unanswered\".\n\n" +
             "══ MARKING SCHEME ══\n" +
             schemeText + "\n\n" +
             "══ RESPONSE SCHEMA ══\n" +
