@@ -39,38 +39,58 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-function cleanRepairAndParseJson(text: string) {
-  let cleaned = text.replace(/^```[a-z]*\s*/i, "").replace(/\s*```$/, "").trim();
-  const firstBrace = cleaned.indexOf("{");
-  const lastBrace = cleaned.lastIndexOf("}");
-  if (firstBrace !== -1 && lastBrace !== -1 && firstBrace < lastBrace) {
-    cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+function repairTruncatedJson(text: string): string {
+  let json = text.trim();
+  if (!json.startsWith('{')) return json;
+
+  const stack: string[] = [];
+  for (let i = 0; i < json.length; i++) {
+    const char = json[i];
+    if (char === '{' || char === '[') stack.push(char === '{' ? '}' : ']');
+    else if (char === '}' || char === ']') stack.pop();
   }
+
+  // Auto-close open structures from end
+  while (stack.length > 0) {
+    const closing = stack.pop();
+    json += closing;
+  }
+  return json;
+}
+
+function cleanRepairAndParseJson(text: string): any {
+  const extractJsonFromText = (input: string) => {
+    let raw = input.replace(/^```[a-z]*\s*/i, "").replace(/\s*```$/, "").trim();
+    const firstBrace = raw.indexOf("{");
+    const lastBrace = raw.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace !== -1 && firstBrace < lastBrace) {
+      raw = raw.substring(firstBrace, lastBrace + 1);
+    }
+    return raw;
+  };
+
+  const raw = extractJsonFromText(text);
+
   try {
-    return JSON.parse(cleaned);
+    return JSON.parse(raw);
   } catch (e) {
-    console.error("Parse failed. Attempting robust repair...", e);
+    console.error("Standard parse failed. Attempting robust repair...", e);
 
-    // Auto-repair common LLM JSON generation errors
-
-    // 1. Remove trailing commas before closing braces/brackets
-    cleaned = cleaned.replace(/,\s*([\]}])/g, "$1");
-
-    // 2. Fix unescaped internal quotes (heuristic: quote inside a string value)
-    // This is hard to do perfectly with regex but we can try to escape quotes
-    // that are preceded by word characters and followed by word characters or spaces
-    cleaned = cleaned.replace(/(\w|\s)"(\w|\s)/g, '$1\\"$2');
-
-    // 3. Fix unescaped newlines within strings (Gemini often does this in explanations)
-    cleaned = cleaned.replace(/(?<=:\s*")(.*?)(?="[,\n}])/gs, (match) => {
-      return match.replace(/\n/g, "\\n").replace(/\r/g, "");
-    });
+    // Heuristic repairs for common LLM JSON errors
+    let repaired = raw
+      .replace(/,\s*([\]}])/g, "$1") // Remove trailing commas
+      .replace(/(\w|\s)"(\w|\s)/g, '$1\\"$2'); // Simple quote escape heuristic
 
     try {
-      return JSON.parse(cleaned);
+      return JSON.parse(repaired);
     } catch (e2) {
-      console.error("Robust repair failed. Raw substring around error:", cleaned.substring(Math.max(0, cleaned.length - 200)));
-      throw new Error(`AI returned invalid JSON: ${(e2 as Error).message}`);
+      console.error("Robust repair failed. Attempting truncation repair...");
+      try {
+        return JSON.parse(repairTruncatedJson(repaired));
+      } catch (e3) {
+        console.error("All repairs failed. Raw start:", raw.substring(0, 100));
+        throw new Error(`AI returned invalid JSON: ${(e3 as Error).message}`);
+      }
     }
   }
 }
@@ -261,15 +281,9 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
             "3. NUMERIC ANSWER — Student wrote a number.\n" +
             "   → Extract the number. Accept equivalent forms (e.g. 0.5 = 1/2 = 50%).\n" +
             "   → Mark correct if within reasonable rounding for the context.\n\n" +
-            "4. SHADED BUBBLES / OMR (Fallback — Deterministic Engine Was Uncertain):\n" +
-            "   The pixel engine was NOT confident for these questions. You MUST attempt them.\n" +
-            "   Use this Chain-of-Thought approach:\n" +
-            "   STEP 1: Locate the answer grid row for this question number.\n" +
-            "   STEP 2: Identify the answer options left-to-right (they represent A, B, C, D).\n" +
-            "   STEP 3: Assess relative darkness — the shaded option is clearly darker.\n" +
-            "   STEP 4: Output the letter of the darkest shaded option.\n" +
-            "   STEP 5: If two options are equally dark (erasure/double-mark), output 'Unanswered', confidence='Low'.\n" +
-            "   CRITICAL: DO NOT guess. Use only visual evidence. If unresolvable, write 'Unanswered'.\n\n" +
+            "4. SHADED BUBBLES / OMR (Fallback):\n" +
+            "   Extract the row for the question number. Assess relative darkness — shaded is darker.\n" +
+            "   Output the letter of the darkest option. If unresolvable (double-mark/empty), use 'Unanswered'.\n\n" +
             "══ GENERAL RULES ══\n" +
             "- STUDENT NAME IDENTIFICATION (CRITICAL):\n" +
             "  → First, scan the top 20% of the image for ANY labels like \"Name:\", \"Pupil:\", \"Student:\", \"Names:\", \"Surname:\", or \"First Name:\".\n" +

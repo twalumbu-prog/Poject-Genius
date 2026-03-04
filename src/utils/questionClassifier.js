@@ -520,7 +520,7 @@ export async function classifyQuestionRegions(imageBitmap, markingSchemeCount) {
 
     for (const slice of slices) {
         const blobs = findBlobs(binary, width, height, slice.y, slice.height);
-        const classification = classifyROI(blobs);
+        const classification = classifyROI(blobs, markingSchemeCount);
 
         // If a row has pure OMR bubbles (or even if it's mixed but has bubbles)
         // We must extract the validCircles and group them by X-distance to handle

@@ -256,12 +256,23 @@ export default function MarkTest() {
                         finalImageBitmap = await createImageBitmap(regResponse.warpedImageData);
 
                         // Convert warped image to Base64 for the VLM Edge Function fallback
+                        const MAX_VLM_HEIGHT = 2000;
+                        const scale = Math.min(1.0, MAX_VLM_HEIGHT / regResponse.warpedImageData.height);
+
                         const tempCanvas = document.createElement('canvas');
-                        tempCanvas.width = regResponse.warpedImageData.width;
-                        tempCanvas.height = regResponse.warpedImageData.height;
+                        tempCanvas.width = Math.round(regResponse.warpedImageData.width * scale);
+                        tempCanvas.height = Math.round(regResponse.warpedImageData.height * scale);
+
                         const tempCtx = tempCanvas.getContext('2d');
-                        tempCtx.putImageData(regResponse.warpedImageData, 0, 0);
-                        finalBase64 = tempCanvas.toDataURL('image/jpeg', 0.8);
+                        if (scale < 1.0) {
+                            // High-quality downsampling: create temporary bitmap then draw with scaling
+                            const tmpBmp = await createImageBitmap(regResponse.warpedImageData);
+                            tempCtx.drawImage(tmpBmp, 0, 0, tempCanvas.width, tempCanvas.height);
+                            tmpBmp.close();
+                        } else {
+                            tempCtx.putImageData(regResponse.warpedImageData, 0, 0);
+                        }
+                        finalBase64 = tempCanvas.toDataURL('image/jpeg', 0.82);
                     } else {
                         // Registration failed or low confidence, recreate bitmap from original
                         const freshBlob = base64ToBlob(base64);

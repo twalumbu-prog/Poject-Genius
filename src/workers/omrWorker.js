@@ -288,7 +288,7 @@ function learnGridModel(omrRegions) {
         avg_width: median(widths) || 25,
         avg_gap: median(gaps) || 15,
         avg_height: median(heights) || 35,
-        total_options: 4 // Standard for this project
+        total_options: omrRegions[0]?.circleBlobs?.length || 4 // Dynamically detect from first confident row
     };
 }
 

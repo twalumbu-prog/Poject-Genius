@@ -44,7 +44,7 @@ function processPage(imageBitmap) {
         if (!quad) continue;
 
         // 0.3 Quadrilateral Validation
-        const validation = validateQuad(quad, sw, sh);
+        const validation = validateQuad(quad, sw, sh, edges);
         if (validation.valid && validation.area > maxArea) {
             maxArea = validation.area;
             bestQuad = {
@@ -248,7 +248,7 @@ function extractQuadCorners(contour) {
     return [tl, tr, br, bl];
 }
 
-function validateQuad(quad, width, height) {
+function validateQuad(quad, width, height, edges) {
     const [tl, tr, br, bl] = quad;
 
     // 1. Area via Shoelace (must be ≥ 35% of image)
@@ -310,7 +310,7 @@ function validateQuad(quad, width, height) {
 
     // 5. Edge Density Consistency
     // Ensure that the edges of the quad actually follow high-gradient paths
-    const edgeDensity = checkEdgeDensity(edges, quad, sw, sh);
+    const edgeDensity = checkEdgeDensity(edges, quad, width, height);
     if (edgeDensity < 0.4) return { valid: false }; // At least 40% of the border must be on a strong edge
 
     // 6. Final Rigorous Confidence
