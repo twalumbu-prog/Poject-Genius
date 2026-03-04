@@ -40,20 +40,37 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 function cleanRepairAndParseJson(text: string) {
-  let cleaned = text.replace(/^```json\s*/, "").replace(/^```\s*/, "").replace(/\s*```$/, "").trim();
+  let cleaned = text.replace(/^```[a-z]*\s*/i, "").replace(/\s*```$/, "").trim();
   const firstBrace = cleaned.indexOf("{");
   const lastBrace = cleaned.lastIndexOf("}");
   if (firstBrace !== -1 && lastBrace !== -1 && firstBrace < lastBrace) {
     cleaned = cleaned.substring(firstBrace, lastBrace + 1);
   }
-  try { return JSON.parse(cleaned); }
-  catch (e) {
-    console.error("Parse failed. Repairing trailing commas. Raw:", cleaned.substring(0, 200) + "...");
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {
+    console.error("Parse failed. Attempting robust repair...", e);
+
+    // Auto-repair common LLM JSON generation errors
+
+    // 1. Remove trailing commas before closing braces/brackets
     cleaned = cleaned.replace(/,\s*([\]}])/g, "$1");
-    try { return JSON.parse(cleaned); }
-    catch (e2) {
-      console.error("Repair failed. Raw:", cleaned);
-      throw new Error("AI returned invalid JSON: " + (e2 as Error).message);
+
+    // 2. Fix unescaped internal quotes (heuristic: quote inside a string value)
+    // This is hard to do perfectly with regex but we can try to escape quotes
+    // that are preceded by word characters and followed by word characters or spaces
+    cleaned = cleaned.replace(/(\w|\s)"(\w|\s)/g, '$1\\"$2');
+
+    // 3. Fix unescaped newlines within strings (Gemini often does this in explanations)
+    cleaned = cleaned.replace(/(?<=:\s*")(.*?)(?="[,\n}])/gs, (match) => {
+      return match.replace(/\n/g, "\\n").replace(/\r/g, "");
+    });
+
+    try {
+      return JSON.parse(cleaned);
+    } catch (e2) {
+      console.error("Robust repair failed. Raw substring around error:", cleaned.substring(Math.max(0, cleaned.length - 200)));
+      throw new Error(`AI returned invalid JSON: ${(e2 as Error).message}`);
     }
   }
 }
@@ -93,7 +110,9 @@ async function callGemini(messages: any[], apiKey: string) {
   const payload = {
     system_instruction: { parts: [{ text: systemMessage }] },
     contents: [{ role: "user", parts }],
-    generationConfig: { temperature: 0.2, topK: 40, topP: 0.95, maxOutputTokens: 4096, responseMimeType: "application/json" },
+    // Important: responseMimeType: "application/json" instructs Gemini to guarantee JSON
+    // but we use temperature 0.2 to limit wild hallucinations
+    generationConfig: { temperature: 0.2, topK: 40, topP: 0.95, maxOutputTokens: 8192, responseMimeType: "application/json" },
   };
 
   let lastError: Error | null = null;
