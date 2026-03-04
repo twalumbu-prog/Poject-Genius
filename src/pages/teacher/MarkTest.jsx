@@ -422,11 +422,15 @@ export default function MarkTest() {
                         const mappedAnswers = markingScheme.questions.map(q => {
                             const normQ = normalizeQuestionNumber(q.question_number);
                             const aiAns = normQ !== null ? aiAnswerMap.get(normQ) : undefined;
+                            const schemeQ = markingScheme.questions.find(sq => normalizeQuestionNumber(sq.question_number) === normQ);
+                            const studentAns = aiAns?.student_answer || '';
+                            const isCorrect = schemeQ ? (String(studentAns).trim().toLowerCase() === String(schemeQ.correct_answer).trim().toLowerCase()) : false;
+
                             return {
                                 question_number: q.question_number,
-                                student_answer: aiAns?.student_answer || '',
-                                is_correct: aiAns ? aiAns.is_correct : false,
-                                feedback: aiAns?.feedback || (aiAns ? '' : 'Not found in extraction'),
+                                student_answer: studentAns,
+                                is_correct: isCorrect,
+                                feedback: aiAns?.feedback || (aiAns ? (isCorrect ? '' : `Incorrect. Expected: ${schemeQ?.correct_answer}`) : 'Not found in extraction'),
                                 rationale: aiAns?.rationale || '',
                                 confidence: aiAns?.confidence || 'Low',
                                 topic: q.topic,

@@ -273,18 +273,14 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
             "══ ANSWER TYPE DETECTION ══\n" +
             "1. LETTER MCQ (Written letter beside question):\n" +
             "   → Extract the handwritten letter (A/B/C/D).\n\n" +
-            "2. SHORT WRITTEN / TEXT:\n" +
-            "   → Extract exactly what is written.\n" +
-            "   → Compare SEMANTICALLY against the correct answer in the marking scheme.\n" +
-            "   → Mark correct if the meaning is equivalent, even if worded differently.\n" +
-            "   → Ignore capitalisation and minor spelling errors.\n\n" +
-            "3. NUMERIC ANSWER — Student wrote a number.\n" +
-            "   → Extract the number. Accept equivalent forms (e.g. 0.5 = 1/2 = 50%).\n" +
-            "   → Mark correct if within reasonable rounding for the context.\n\n" +
+            "3. NUMERIC ANSWER:\n" +
+            "   → Extract the number exactly as written.\n\n" +
             "4. SHADED BUBBLES / OMR (Fallback):\n" +
-            "   Extract the row for the question number. Assess relative darkness — shaded is darker.\n" +
-            "   Output the letter of the darkest option. If unresolvable (double-mark/empty), use 'Unanswered'.\n\n" +
+            "   → Identify which bubble (A/B/C/D) is shaded for each row.\n\n" +
             "══ GENERAL RULES ══\n" +
+            "- DO NOT guess the answer based on context. Only extract what is VISUALLY PRESENT.\n" +
+            "- If multiple bubbles are shaded, list them all (e.g., \"A, B\").\n" +
+            "- If a student wrote something beside a bubble, extract that text.\n" +
             "- STUDENT NAME IDENTIFICATION (CRITICAL):\n" +
             "  → First, scan the top 20% of the image for ANY labels like \"Name:\", \"Pupil:\", \"Student:\", \"Names:\", \"Surname:\", or \"First Name:\".\n" +
             "  → Extract the handwritten text found in the immediate vicinity (usually to the right or below these labels).\n" +
@@ -309,9 +305,7 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
             "      \"question_number\": 1,\n" +
             "      \"answer_type\": \"letter_mcq|shaded_bubble|short_written|numeric\",\n" +
             "      \"student_answer\": \"string\",\n" +
-            "      \"is_correct\": true,\n" +
-            "      \"feedback\": \"string (empty if correct, explanation if wrong)\",\n" +
-            "      \"rationale\": \"string (explain exactly what visual evidence led to this answer - e.g. 'I see a faint marking in bubble B but bubble A is clearly shaded dark')\",\n" +
+            "      \"rationale\": \"string (explain exactly what visual evidence led to this extraction)\",\n" +
             "      \"confidence\": \"High|Medium|Low\"\n" +
             "    }]\n" +
             "  }]\n" +
