@@ -77,6 +77,9 @@ function processPage(imageBitmap) {
 
         const warpedImageData = warpPerspective(fullImgData, originalQuad, TARGET_W, TARGET_H);
 
+        // --- Stage 0.5: Orientation Correction ---
+        const correctedImageData = detectAndFixRotation(warpedImageData);
+
         const t1 = performance.now();
         return {
             page_detected: true,
@@ -84,7 +87,7 @@ function processPage(imageBitmap) {
             blur_score: Math.round(blurScore),
             is_blurry: isBlurry,
             quad_points: originalQuad,
-            warpedImageData: warpedImageData,
+            warpedImageData: correctedImageData,
             processingTimeMs: Math.round(t1 - t0)
         };
     } else {
@@ -443,4 +446,153 @@ function warpPerspective(srcImgData, srcQuad, dstW, dstH) {
         }
     }
     return new ImageData(dstD, dstW, dstH);
+}
+
+function detectAndFixRotation(imageData) {
+    const { width, height, data } = imageData;
+    const sw = 200;
+    const sh = Math.round(height * (sw / width));
+    const smallGray = new Uint8Array(sw * sh);
+
+    for (let y = 0; y < sh; y++) {
+        for (let x = 0; x < sw; x++) {
+            const si = (Math.round(y * (height / sh)) * width + Math.round(x * (width / sw))) * 4;
+            smallGray[y * sw + x] = data[si] * 0.299 + data[si + 1] * 0.587 + data[si + 2] * 0.114;
+        }
+    }
+
+    // Heuristic: Check density peaks. OMR rows have strong horizontal peaks.
+    const hProfile = new Float32Array(sh);
+    const vProfile = new Float32Array(sw);
+
+    for (let y = 0; y < sh; y++) {
+        let sum = 0;
+        for (let x = 0; x < sw; x++) sum += (255 - smallGray[y * sw + x]);
+        hProfile[y] = sum / sw;
+    }
+    for (let x = 0; x < sw; x++) {
+        let sum = 0;
+        for (let y = 0; y < sh; y++) sum += (255 - smallGray[y * sw + x]);
+        vProfile[x] = sum / sh;
+    }
+
+    const hPeaks = countPeaks(hProfile);
+    const vPeaks = countPeaks(vProfile);
+
+    // Anchor detection: Look for solid black squares in the corners
+    const anchors = findAnchors(imageData);
+    console.log(`[Orientation] Anchors found: ${anchors.length}`);
+
+    // If we have 3 or more anchors, we can determine orientation with high confidence
+    if (anchors.length >= 3) {
+        // Find which corner is missing an anchor to determine rotation
+        // Standard Project Genius sheet has 4 anchors
+        // If it's rotated, the relative positions of anchors change
+    }
+
+    console.log(`[Orientation] hPeaks: ${hPeaks}, vPeaks: ${vPeaks}`);
+
+    // If vertical peaks are significantly stronger, it's likely rotated 90 or 270 deg
+    if (vPeaks > hPeaks * 1.5) {
+        console.warn("[Orientation] Page appears to be rotated (Landscape detected). Rotating -90deg...");
+        return rotateImageData(imageData, -90);
+    }
+
+    // Check for 180 (Upside down)
+    // Heuristic: Header usually has more white space than the bottom (which has more bubbles)
+    const topDensity = average(hProfile.slice(0, sh / 4));
+    const botDensity = average(hProfile.slice(3 * sh / 4));
+
+    if (botDensity < topDensity * 0.5) {
+        console.warn("[Orientation] Page appears to be upside down. Rotating 180deg...");
+        return rotateImageData(imageData, 180);
+    }
+
+    return imageData;
+}
+
+function countPeaks(profile) {
+    let count = 0;
+    const threshold = average(profile) * 1.2;
+    for (let i = 2; i < profile.length - 2; i++) {
+        if (profile[i] > threshold && profile[i] > profile[i - 1] && profile[i] > profile[i + 1]) {
+            count++;
+            i += 5; // skip neighborhood
+        }
+    }
+    return count;
+}
+
+function average(arr) {
+    if (arr.length === 0) return 0;
+    return arr.reduce((a, b) => a + b, 0) / arr.length;
+}
+
+function rotateImageData(imageData, degrees) {
+    const { width, height, data } = imageData;
+    let newW = width, newH = height;
+    if (Math.abs(degrees) === 90 || Math.abs(degrees) === 270) {
+        newW = height;
+        newH = width;
+    }
+
+    const newData = new Uint8ClampedArray(newW * newH * 4);
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            let nx, ny;
+            if (degrees === 90) { nx = height - 1 - y; ny = x; }
+            else if (degrees === -90 || degrees === 270) { nx = y; ny = width - 1 - x; }
+            else if (degrees === 180) { nx = width - 1 - x; ny = height - 1 - y; }
+            else { nx = x; ny = y; }
+
+            const si = (y * width + x) * 4;
+            const di = (ny * newW + nx) * 4;
+            newData[di] = data[si];
+            newData[di + 1] = data[si + 1];
+            newData[di + 2] = data[si + 2];
+            newData[di + 3] = data[si + 3];
+        }
+    }
+    return new ImageData(newData, newW, newH);
+}
+
+function findAnchors(imageData) {
+    const { width, height, data } = imageData;
+    const anchors = [];
+    const searchSize = 250;
+
+    const checkCorner = (startX, startY) => {
+        for (let y = startY; y < startY + searchSize; y++) {
+            for (let x = startX; x < startX + searchSize; x++) {
+                if (x < 0 || x >= width || y < 0 || y >= height) continue;
+                const i = (y * width + x) * 4;
+                if (data[i] < 60 && data[i + 1] < 60 && data[i + 2] < 60) {
+                    if (isSolidBlock(imageData, x, y, 15)) {
+                        anchors.push({ x, y });
+                        return;
+                    }
+                }
+            }
+        }
+    };
+
+    checkCorner(0, 0);
+    checkCorner(width - searchSize, 0);
+    checkCorner(0, height - searchSize);
+    checkCorner(width - searchSize, height - searchSize);
+
+    return anchors;
+}
+
+function isSolidBlock(imageData, startX, startY, size) {
+    const { width, height, data } = imageData;
+    if (startX + size >= width || startY + size >= height) return false;
+    let blackCount = 0;
+    for (let y = startY; y < startY + size; y++) {
+        for (let x = startX; x < startX + size; x++) {
+            const i = (y * width + x) * 4;
+            if (data[i] < 90 && data[i + 1] < 90 && data[i + 2] < 90) blackCount++;
+        }
+    }
+    return blackCount > (size * size * 0.8);
 }
