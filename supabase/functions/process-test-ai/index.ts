@@ -239,15 +239,23 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
             "   * is_correct: false\n" +
             "   * confidence: \"Low\"\n" +
             "   * feedback: \"Missing from page or illegible\"\n\n" +
-            "══ ANSWER TYPE DETECTION ══\n" +
-            "For each question, first determine HOW the student answered, then extract accordingly:\n\n" +
-            "1. LETTER MCQ — Student wrote a letter (A/B/C/D) next to a question number.\n" +
-            "   → Extract the letter as-is. Accept both capital and lowercase.\n\n" +
-            "2. SHADED / FILLED BUBBLE — Student filled or shaded a circle from a row of options (A B C D).\n" +
-            "   → Identify the darkest, most completely filled circle as the answer.\n" +
-            "   → If two circles appear equally filled, pick the one more completely shaded.\n" +
-            "   → Report as the corresponding letter (A, B, C, or D).\n\n" +
-            "3. SHORT WRITTEN ANSWER / PHRASE — Student wrote a word, phrase, or sentence.\n" +
+            "══ ANSWER TYPE DETECTION & CHAIN OF THOUGHT ══\n" +
+            "For each question, determine the answer format. If it involves shaded bubbles, you MUST use rigorous visual contrast analysis.\n\n" +
+            "1. SHADED / FILLED BUBBLES (OMR Format):\n" +
+            "   → Look at the row of options (e.g., A B C D) for the question number.\n" +
+            "   → Analyze the internal darkness of every circle.\n" +
+            "   → An empty circle has a dark border but a white inside.\n" +
+            "   → A filled circle has dark pencil/pen marks covering its inside.\n" +
+            "   → Look for the circle that is SIGNIFICANTLY darker inside than the others.\n" +
+            "   → Ignore faint smudges or erasures. The intended answer is the most deliberately filled/shaded one.\n" +
+            "   → If you are unsure, set confidence to 'Low'. DO NOT GUESS arbitrarily.\n\n" +
+            "2. LETTER MCQ (Written letter beside question):\n" +
+            "   → Extract the handwritten letter (A/B/C/D).\n\n" +
+            "3. SHORT WRITTEN / NUMERIC:\n" +
+            "   → Extract exactly what is written.\n" +
+            "   → Mark correct if the meaning/value matches the scheme.\n\n" +
+            "══ OMR CoT REQUIREMENT ══\n" +
+            "If the test uses shaded bubbles, you MUST explain your visual evaluation in the `omr_confidence_reasoning` field before outputting the final answer. Example: 'Options A, C, D are empty white circles. Option B is heavily shaded dark gray. Therefore, B is the answer.'\n\n" +
             "   → Extract the exact text the student wrote.\n" +
             "   → Compare SEMANTICALLY against the correct answer in the marking scheme.\n" +
             "   → Mark correct if the meaning is equivalent, even if worded differently.\n" +
@@ -279,6 +287,7 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
             "    \"answers\": [{\n" +
             "      \"question_number\": 1,\n" +
             "      \"answer_type\": \"letter_mcq|shaded_bubble|short_written|numeric\",\n" +
+            "      \"omr_confidence_reasoning\": \"string (MUST explain visual contrast if shaded_bubble, else empty)\",\n" +
             "      \"student_answer\": \"string\",\n" +
             "      \"is_correct\": true,\n" +
             "      \"feedback\": \"string (empty if correct, explanation if wrong)\",\n" +
