@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { ArrowLeft, Camera, Upload, CheckCircle, AlertCircle, Sparkles, ChevronDown, ChevronUp, X, FileCheck } from 'lucide-react';
-import { createWorker } from 'tesseract.js';
 import { explodeFilesToImages, processForVLM, blobToBase64 } from '../../utils/imageProcessing';
 import { normalizeQuestionNumber } from '../../utils/ocrValidation';
+import { mergeHybridAnswers } from '../../utils/hybridAnswerMerger';
 import './Page.css';
 
 export default function MarkTest() {
@@ -13,7 +13,7 @@ export default function MarkTest() {
     const [test, setTest] = useState(null);
     const [markingScheme, setMarkingScheme] = useState(null);
     const [isProcessing, setIsProcessing] = useState(false);
-    const [processingStatus, setProcessingStatus] = useState('');
+    const [, setProcessingStatus] = useState('');
     const [processingError, setProcessingError] = useState(null);
     const [results, setResults] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -228,15 +228,57 @@ export default function MarkTest() {
                 setProcessingStatus(`Marking script ${index + 1} of ${total}${total > 1 ? `: ${label}` : ''}...`);
 
                 try {
+                    // --- STAGE B: DETERMINISTIC OMR ENGINE ---
+                    setProcessingStatus(`[OMR] Analysing layout and bubbles for script ${index + 1}...`);
+                    const blob = base64ToBlob(base64);
+                    const imageBitmap = await createImageBitmap(blob);
+
+                    const omrWorker = new Worker(new URL('../../workers/omrWorker.js', import.meta.url), { type: 'module' });
+
+                    const omrPromise = new Promise((res, rej) => {
+                        omrWorker.onmessage = (e) => res(e.data);
+                        omrWorker.onerror = (err) => rej(err);
+                    });
+
+                    omrWorker.postMessage({
+                        messageType: 'PROCESS_OMR',
+                        id: index,
+                        imageBitmap,
+                        markingSchemeCount: markingScheme.questions.length
+                    }, [imageBitmap]); // Transfer ownership to worker
+
+                    const omrResponse = await omrPromise;
+                    omrWorker.terminate();
+
+                    if (!omrResponse.success) {
+                        console.warn(`[OMR] Worker failed for script ${index + 1}: ${omrResponse.error}. Falling back to full OCR.`);
+                    }
+
+                    const omrResults = omrResponse.omrResults || [];
+
+                    // Identify which questions need to go to OCR
+                    // Questions with clear or blank OMR status do not need OCR
+                    const clearOmrQuestionNumbers = omrResults
+                        .filter(r => r.status === 'clear' || r.status === 'blank')
+                        .map(r => r.question_number);
+
+                    const target_questions = markingScheme.questions
+                        .map(q => normalizeQuestionNumber(q.question_number))
+                        .filter(num => num !== null && !clearOmrQuestionNumbers.includes(num));
+
+                    // --- STAGE C: OCR/VLM ENGINE ---
+                    setProcessingStatus(`[OCR] Analysing ${target_questions.length} handwritten/ambiguous questions...`);
+
                     const payload = {
                         mode: 'mark_script',
                         image: base64,
                         imageIndex: index,
                         markingScheme: markingScheme.questions,
+                        target_questions,
                         geminiKey: import.meta.env.VITE_GEMINI_API_KEY
                     };
                     const payloadSize = Math.round(JSON.stringify(payload).length / 1024);
-                    console.log(`[AI Scan] Sending script ${index + 1} (${label}). Size: ${payloadSize}KB`);
+                    console.log(`[AI Scan] Sending script ${index + 1} (${label}). Size: ${payloadSize}KB. Targets: ${target_questions.length}`);
 
                     const response = await fetch(
                         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-test-ai`,
@@ -259,13 +301,13 @@ export default function MarkTest() {
                     }
 
                     const data = await response.json();
-                    const resultsArray = data.results ? data.results : [data];
 
-                    const studentData = resultsArray[0];
+                    // --- STAGE D: HYBRID MERGER ---
+                    const mergedResultsArray = mergeHybridAnswers(omrResults, data, markingScheme.questions);
+
+                    const studentData = mergedResultsArray[0];
                     if (studentData) {
                         // ── Part 1: Bulletproof Normalized Question Mapping ────────────
-                        // Build a precomputed O(n) normalized integer map of AI answers.
-                        // This avoids quadratic find() calls and catches LLM format drift.
                         const aiAnswerMap = new Map();
                         const duplicateWarnings = [];
 
@@ -277,7 +319,6 @@ export default function MarkTest() {
                                     return;
                                 }
                                 if (aiAnswerMap.has(normKey)) {
-                                    // Part 1.3: Duplicate handling — keep FIRST, log warning
                                     duplicateWarnings.push({ normKey, duplicate: a });
                                     console.warn(`[OCR] Duplicate AI answer for Q${normKey} — keeping first occurrence`, a);
                                 } else {
@@ -301,11 +342,12 @@ export default function MarkTest() {
                                 is_correct: aiAns ? aiAns.is_correct : false,
                                 feedback: aiAns?.feedback || (aiAns ? '' : 'Not found in extraction'),
                                 confidence: aiAns?.confidence || 'Low',
-                                topic: q.topic
+                                topic: q.topic,
+                                _debug: aiAns?._debug || {} // Include hybrid routing info
                             };
                         });
 
-                        // Find truly unmapped AI answers (those that never matched a scheme question)
+                        // Find truly unmapped AI answers 
                         const schemeNormSet = new Set(
                             markingScheme.questions.map(q => normalizeQuestionNumber(q.question_number)).filter(n => n !== null)
                         );
@@ -323,12 +365,14 @@ export default function MarkTest() {
                             imageIndex: index,
                             studentAnswers: mappedAnswers,
                             unmappedAnswers: unmapped,
-                            // Part 6 telemetry metadata from Edge
+                            // Extracted edge server metadata + Stage B metadata
                             _debugMeta: {
-                                raw_llm_count: data.raw_llm_count,
-                                repaired_count: data.repaired_count,
+                                raw_llm_count: data._debugMeta?.raw_llm_count || 0,
+                                repaired_count: data._debugMeta?.repaired_count || 0,
                                 duplicate_count: duplicateWarnings.length,
-                                validation_passed: data.validation_passed
+                                validation_passed: data._debugMeta?.validation_passed || false,
+                                omr_layout: omrResponse.layoutResult,
+                                omr_confidence: Object.values(omrResults).reduce((acc, obj) => acc + (obj.confidence || 0), 0) / (omrResults.length || 1)
                             }
                         };
                     }
@@ -532,7 +576,7 @@ export default function MarkTest() {
                     const blob = base64ToBlob(studentImage);
                     const isPdf = mimeString === 'application/pdf';
                     const fileExt = isPdf ? 'pdf' : 'jpg';
-                    const fileName = `scanned-exams/${testId}/${pupilId}_${Date.now()}.${fileExt}`;
+                    const fileName = `scanned - exams / ${testId} / ${pupilId}_${Date.now()}.${fileExt}`;
 
                     const { error: uploadError } = await supabase.storage
                         .from('student-scripts')
@@ -617,8 +661,8 @@ export default function MarkTest() {
             }));
 
             const subtopicAnalysis = Object.entries(subtopicPerf)
-                .filter(([_, data]) => data.id) // Only if linked to syllabus
-                .map(([_, data]) => ({
+                .filter(([, data]) => data.id) // Only if linked to syllabus
+                .map(([, data]) => ({
                     result_id: result.id,
                     subtopic_id: data.id,
                     total_questions: data.total,
@@ -633,8 +677,8 @@ export default function MarkTest() {
                 }));
 
             const loAnalysis = Object.entries(loPerf)
-                .filter(([_, data]) => data.id) // Only if linked to syllabus
-                .map(([_, data]) => ({
+                .filter(([, data]) => data.id) // Only if linked to syllabus
+                .map(([, data]) => ({
                     result_id: result.id,
                     learning_outcome_id: data.id,
                     total_questions: data.total,
@@ -721,7 +765,7 @@ export default function MarkTest() {
     if (!markingScheme) {
         return (
             <div className="page page-with-container">
-                <button className="back-button" onClick={() => navigate(`/teacher/test/${testId}`)}>
+                <button className="back-button" onClick={() => navigate(`/ teacher / test / ${testId}`)}>
                     <ArrowLeft size={20} />
                     Back to Test
                 </button>
@@ -729,7 +773,7 @@ export default function MarkTest() {
                     <AlertCircle size={48} className="icon-error" />
                     <h2>No Marking Scheme Found</h2>
                     <p>You must create or generate a marking scheme before you can mark student scripts.</p>
-                    <button className="btn btn-primary" onClick={() => navigate(`/teacher/stream/${test.test_stream_id}/setup`)}>
+                    <button className="btn btn-primary" onClick={() => navigate(`/ teacher / stream / ${test.test_stream_id} / setup`)}>
                         Go to Setup
                     </button>
                 </div>
@@ -739,7 +783,7 @@ export default function MarkTest() {
 
     return (
         <div className="page page-with-container">
-            <button className="back-button" onClick={() => navigate(`/teacher/test/${testId}`)}>
+            <button className="back-button" onClick={() => navigate(`/ teacher / test / ${testId}`)}>
                 <ArrowLeft size={20} />
                 Back to Test
             </button>
@@ -899,7 +943,7 @@ export default function MarkTest() {
                                                     } catch (err) {
                                                         console.error("Worker enhancement failed:", err);
                                                     }
-                                                    imageObjects.push({ base64: enhancedBase64, label: `Photo ${idx + 1}` });
+                                                    imageObjects.push({ base64: enhancedBase64, label: `Photo ${idx + 1} ` });
                                                 }
 
                                                 const allBase64 = imageObjects.map(io => io.base64);
@@ -953,7 +997,7 @@ export default function MarkTest() {
                         <div className="scan-bar-wrap">
                             <div
                                 className="scan-bar-fill"
-                                style={{ width: `${scanProgress}%` }}
+                                style={{ width: `${scanProgress}% ` }}
                             />
                         </div>
                         <div className="scan-bar-meta">
@@ -1149,7 +1193,7 @@ export default function MarkTest() {
                                     <h3>Verification</h3>
                                     <div className="review-answers-list" style={{ width: '100%' }}>
                                         {reviewData.studentAnswers.map((ans, idx) => (
-                                            <div key={idx} className={`review-item ${ans.confidence === 'Low' || !ans.student_answer ? 'review-warning' : ''}`}>
+                                            <div key={idx} className={`review - item ${ans.confidence === 'Low' || !ans.student_answer ? 'review-warning' : ''} `}>
                                                 <div className="review-item-header">
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                         <span className="q-circle">Q{ans.question_number}</span>
@@ -1161,7 +1205,7 @@ export default function MarkTest() {
                                                                 Not Found
                                                             </span>
                                                         )}
-                                                        <span className={`status-badge ${ans.is_correct ? 'correct' : 'incorrect'}`}>
+                                                        <span className={`status - badge ${ans.is_correct ? 'correct' : 'incorrect'} `}>
                                                             {ans.is_correct ? 'Correct' : 'Incorrect'}
                                                         </span>
                                                     </div>
@@ -1276,7 +1320,7 @@ export default function MarkTest() {
                                         <span className="scan-result-name">{res.studentName || 'Unknown'}</span>
                                         <span className="scan-result-fraction">{res.score}/{markingScheme.questions.length} marks</span>
                                     </div>
-                                    <span className={`mini-badge ${tier}`}>{pct.toFixed(1)}%</span>
+                                    <span className={`mini - badge ${tier} `}>{pct.toFixed(1)}%</span>
                                 </div>
                             );
                         })}
@@ -1286,7 +1330,7 @@ export default function MarkTest() {
                         <button className="btn btn-primary" onClick={() => { setResults(null); setBatchResults([]); setScanComplete(null); }}>
                             <Camera size={16} /> Mark More Scripts
                         </button>
-                        <button className="btn btn-secondary" onClick={() => navigate(`/teacher/test/${testId}`)}>
+                        <button className="btn btn-secondary" onClick={() => navigate(`/ teacher / test / ${testId} `)}>
                             View All Results
                         </button>
                     </div>

@@ -182,7 +182,7 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json();
-    const { mode, image, images, markingScheme, testParams, geminiKey } = body;
+    const { mode, image, images, markingScheme, target_questions, testParams, geminiKey } = body;
     const buildParts = () => (images || (image ? [image] : [])).map((img: string) => ({ type: "image_url", image_url: { url: img } }));
 
     if (!(geminiKey || GEMINI_API_KEY) && !ANTHROPIC_API_KEY) return jsonResponse({ error: "No API keys configured" }, 500);
@@ -219,8 +219,19 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
       if (!image && (!images || images.length === 0)) throw new Error("image required");
       if (!markingScheme) throw new Error("markingScheme required");
 
-      const schemeText = JSON.stringify(markingScheme, null, 2);
-      const questionCount = markingScheme.length;
+      let filteredScheme = markingScheme;
+      if (target_questions && Array.isArray(target_questions) && target_questions.length > 0) {
+        filteredScheme = markingScheme.filter((item: any) => {
+          const qNumStr = String(item.question_number).trim();
+          const qNum = parseInt(qNumStr.match(/\d+/)?.[0] || "0", 10);
+          return target_questions.includes(qNum);
+        });
+        // Fallback if none matched (e.g. malformed scheme)
+        if (filteredScheme.length === 0) filteredScheme = markingScheme;
+      }
+
+      const schemeText = JSON.stringify(filteredScheme, null, 2);
+      const questionCount = filteredScheme.length;
 
       messages = [
         {
@@ -232,37 +243,27 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
             "2. You MUST return EXACTLY " + questionCount + " objects in the answers array.\n" +
             "3. NEVER return fewer items.\n" +
             "4. NEVER stop early.\n" +
-            "5. NEVER omit a question.\n" +
+            "5. NEVER omit a question. If a question in the scheme uses shaded bubbles (OMR), DO NOT process it yourself unless it is completely ambiguous. Focus ONLY on handwriting, short text, or numeric extraction.\n" +
             "6. The `question_number` MUST be an integer exactly matching the scheme. Do NOT output strings like \"1\", output 1.\n" +
             "7. If an answer is missing, unclear, or illegible, you MUST still return the object and set:\n" +
             "   * student_answer: \"Unanswered\"\n" +
             "   * is_correct: false\n" +
             "   * confidence: \"Low\"\n" +
             "   * feedback: \"Missing from page or illegible\"\n\n" +
-            "══ ANSWER TYPE DETECTION & CHAIN OF THOUGHT ══\n" +
-            "For each question, determine the answer format. If it involves shaded bubbles, you MUST use rigorous visual contrast analysis.\n\n" +
-            "1. SHADED / FILLED BUBBLES (OMR Format):\n" +
-            "   → Look at the row of options (e.g., A B C D) for the question number.\n" +
-            "   → Analyze the internal darkness of every circle.\n" +
-            "   → An empty circle has a dark border but a white inside.\n" +
-            "   → A filled circle has dark pencil/pen marks covering its inside.\n" +
-            "   → Look for the circle that is SIGNIFICANTLY darker inside than the others.\n" +
-            "   → Ignore faint smudges or erasures. The intended answer is the most deliberately filled/shaded one.\n" +
-            "   → If you are unsure, set confidence to 'Low'. DO NOT GUESS arbitrarily.\n\n" +
-            "2. LETTER MCQ (Written letter beside question):\n" +
+            "══ ANSWER TYPE DETECTION ══\n" +
+            "1. LETTER MCQ (Written letter beside question):\n" +
             "   → Extract the handwritten letter (A/B/C/D).\n\n" +
-            "3. SHORT WRITTEN / NUMERIC:\n" +
+            "2. SHORT WRITTEN / TEXT:\n" +
             "   → Extract exactly what is written.\n" +
-            "   → Mark correct if the meaning/value matches the scheme.\n\n" +
-            "══ OMR CoT REQUIREMENT ══\n" +
-            "If the test uses shaded bubbles, you MUST explain your visual evaluation in the `omr_confidence_reasoning` field before outputting the final answer. Example: 'Options A, C, D are empty white circles. Option B is heavily shaded dark gray. Therefore, B is the answer.'\n\n" +
-            "   → Extract the exact text the student wrote.\n" +
             "   → Compare SEMANTICALLY against the correct answer in the marking scheme.\n" +
             "   → Mark correct if the meaning is equivalent, even if worded differently.\n" +
             "   → Ignore capitalisation and minor spelling errors.\n\n" +
-            "4. NUMERIC ANSWER — Student wrote a number.\n" +
+            "3. NUMERIC ANSWER — Student wrote a number.\n" +
             "   → Extract the number. Accept equivalent forms (e.g. 0.5 = 1/2 = 50%).\n" +
             "   → Mark correct if within reasonable rounding for the context.\n\n" +
+            "4. SHADED BUBBLES / OMR (Fallback Only):\n" +
+            "   → If you are forced to grade a bubble question, find the darkest shaded circle.\n" +
+            "   → If you are unsure, guessing is FORBIDDEN. Write 'Unanswered'.\n\n" +
             "══ GENERAL RULES ══\n" +
             "- STUDENT NAME IDENTIFICATION (CRITICAL):\n" +
             "  → First, scan the top 20% of the image for ANY labels like \"Name:\", \"Pupil:\", \"Student:\", \"Names:\", \"Surname:\", or \"First Name:\".\n" +
@@ -287,7 +288,6 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
             "    \"answers\": [{\n" +
             "      \"question_number\": 1,\n" +
             "      \"answer_type\": \"letter_mcq|shaded_bubble|short_written|numeric\",\n" +
-            "      \"omr_confidence_reasoning\": \"string (MUST explain visual contrast if shaded_bubble, else empty)\",\n" +
             "      \"student_answer\": \"string\",\n" +
             "      \"is_correct\": true,\n" +
             "      \"feedback\": \"string (empty if correct, explanation if wrong)\",\n" +
@@ -323,7 +323,17 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
     if (mode === "mark_script" && markingScheme) {
       console.log(`[Validation V51] Post-processing edge AI results for ${result?.results?.[0]?.studentName || "Unknown"}`);
 
-      const expectedQuestionCount = markingScheme.length;
+      let filteredScheme = markingScheme;
+      if (target_questions && Array.isArray(target_questions) && target_questions.length > 0) {
+        filteredScheme = markingScheme.filter((item: any) => {
+          const qNumStr = String(item.question_number).trim();
+          const qNum = parseInt(qNumStr.match(/\d+/)?.[0] || "0", 10);
+          return target_questions.includes(qNum);
+        });
+        if (filteredScheme.length === 0) filteredScheme = markingScheme;
+      }
+
+      const expectedQuestionCount = filteredScheme.length;
       let aiAnswers = result?.results?.[0]?.answers || [];
       const rawCount = aiAnswers.length;
 
@@ -346,13 +356,13 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
 
       // 2. BUILD O(1) MAP OF AI ANSWERS
       const answerMap = new Map();
-      uniqueAnswers.forEach(ans => answerMap.set(ans.question_number, ans));
+      uniqueAnswers.forEach((ans: any) => answerMap.set(ans.question_number, ans));
 
       // 3. HARD REPAIR: Enforce exactly the expected scheme questions
       const repairedAnswers = [];
       let missingCount = 0;
 
-      for (const schemeQ of markingScheme) {
+      for (const schemeQ of filteredScheme) {
         const qNum = normalizeQuestionNumber(schemeQ.question_number);
         if (qNum === null) continue; // Invalid scheme question
 
