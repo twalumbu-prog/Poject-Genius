@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { SyllabusService } from '../../lib/syllabusService';
-import { ArrowLeft, Save, Plus, Trash2, CheckCircle, AlertCircle, HelpCircle, Sparkles, Loader, Printer, Link } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Trash2, CheckCircle, AlertCircle, AlertTriangle, HelpCircle, Sparkles, Loader, Printer, Link } from 'lucide-react';
 import './Page.css';
 import './MarkingSchemeReview.css';
 
