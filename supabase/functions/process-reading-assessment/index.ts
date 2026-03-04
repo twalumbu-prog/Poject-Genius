@@ -27,13 +27,33 @@ function cleanAndParseJson(text: string) {
     }
 }
 
+/**
+ * Converts an ArrayBuffer to a Base64 string WITHOUT using the spread operator.
+ * The naive approach `btoa(String.fromCharCode(...new Uint8Array(buf)))` causes
+ * "Maximum call stack size exceeded" for audio files larger than ~250KB because
+ * spreading millions of arguments overflows the JS engine's call stack.
+ *
+ * This chunked implementation processes 8KB at a time, keeping stack depth constant
+ * regardless of file size.
+ */
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    const CHUNK_SIZE = 8192; // 8KB chunks — safe for all audio sizes
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+        const chunk = bytes.subarray(i, i + CHUNK_SIZE);
+        binary += String.fromCharCode(...chunk); // chunk is always small, never overflows
+    }
+    return btoa(binary);
+}
+
 async function callGeminiAudio(audioData: string, mimeType: string, passageText: string, apiKey: string) {
     const model = "gemini-2.5-flash";
     const payload = {
         contents: [{
             parts: [
                 {
-                    text: `You are an expert reading fluctuating specialist. 
+                    text: `You are an expert reading fluency specialist. 
 Analyze this audio recording of a student reading the following passage:
 
 Passage: "${passageText}"
@@ -105,7 +125,6 @@ Deno.serve(async (req: Request) => {
         let body;
         try {
             body = await req.json();
-            console.log("Body parsed successfully:", JSON.stringify(body));
         } catch (e) {
             console.error("Failed to parse request body:", e);
             return jsonResponse({ error: "Invalid JSON body" }, 400);
@@ -139,7 +158,6 @@ Return ONLY a valid JSON object:
   "level": "${level}"
 }`;
 
-            console.log("Generating passage with params:", genParams);
             const resp = await fetch(
                 `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
                 {
@@ -154,13 +172,11 @@ Return ONLY a valid JSON object:
 
             if (!resp.ok) {
                 const errorText = await resp.text();
-                console.error("Gemini AI generation failed:", resp.status, errorText);
                 throw new Error(`AI generation failed: ${resp.status} - ${errorText}`);
             }
 
             const result = await resp.json();
             const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-            console.log("AI Response text:", text);
             return jsonResponse(cleanAndParseJson(text));
         }
 
@@ -170,7 +186,7 @@ Return ONLY a valid JSON object:
                 throw new Error("Missing required parameters (audioUrl, passageText, passageId, pupilId)");
             }
 
-            // 1. Download audio from storage
+            // 1. Download audio from Supabase storage
             const pathMatch = audioUrl.match(/reading-audio\/(.+)$/);
             const path = pathMatch ? pathMatch[1] : audioUrl;
 
@@ -181,15 +197,17 @@ Return ONLY a valid JSON object:
 
             if (downloadError) throw new Error(`Failed to download audio: ${downloadError.message}`);
 
-            // 2. Convert Blob to Base64
+            // 2. Convert Blob to Base64 using CHUNKED method to prevent call stack overflow.
+            //    Audio files can be several MB; the naive spread operator approach fails on large files.
             const arrayBuffer = await audioBlob.arrayBuffer();
-            const base64Audio = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+            const base64Audio = arrayBufferToBase64(arrayBuffer);
             const mimeType = audioBlob.type || "audio/webm";
+            console.log(`[Audio] Downloaded ${Math.round(arrayBuffer.byteLength / 1024)}KB, MIME: ${mimeType}`);
 
-            // 3. Process with Gemini
+            // 3. Send to Gemini for analysis
             const analysisResults = await callGeminiAudio(base64Audio, mimeType, passageText, apiKey);
 
-            // 4. Save to Database
+            // 4. Save session to database
             const sessionData = {
                 passage_id: passageId,
                 pupil_id: pupilId,
@@ -218,7 +236,7 @@ Return ONLY a valid JSON object:
                 currentSessionId = newSession.id;
             }
 
-            // Word-Level Analysis
+            // 5. Save word-level analysis
             const wordAnalyses = analysisResults.transcription.map((w: any, idx: number) => ({
                 session_id: currentSessionId,
                 word_index: idx,
