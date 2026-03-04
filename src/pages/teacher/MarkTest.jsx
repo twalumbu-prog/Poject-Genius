@@ -8,6 +8,8 @@ import { mergeHybridAnswers } from '../../utils/hybridAnswerMerger';
 import { computeScriptTelemetry, formatTelemetryForUI } from '../../utils/visionTelemetry';
 import './Page.css';
 
+const ENABLE_OPR_SCAN = true;
+
 export default function MarkTest() {
     const { testId } = useParams();
     const navigate = useNavigate();
@@ -176,6 +178,7 @@ export default function MarkTest() {
 
         const total = imageObjects.length;
         const parsedBatch = new Array(total).fill(null);
+        const engine = imageObjects[0]?.engine || 'legacy';
 
         // ── Part 5: Exponential backoff with jitter ────────────────────────
         const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -282,9 +285,13 @@ export default function MarkTest() {
                     const page_confidence = regResponse.page_confidence || 0;
 
                     // --- STAGE A & B: DETERMINISTIC OMR ENGINE ---
-                    setProcessingStatus(`[OMR] Analysing layout and bubbles for script ${index + 1}...`);
+                    setProcessingStatus(`[${engine === 'opr' ? 'OPR' : 'OMR'}] Analysing layout and bubbles for script ${index + 1}...`);
 
-                    const omrWorker = new Worker(new URL('../../workers/omrWorker.js', import.meta.url), { type: 'module' });
+                    const workerPath = engine === 'opr'
+                        ? '../../workers/oprPipeline/oprWorker.js'
+                        : '../../workers/omrWorker.js';
+
+                    const omrWorker = new Worker(new URL(workerPath, import.meta.url), { type: 'module' });
 
                     const omrPromise = new Promise((res, rej) => {
                         omrWorker.onmessage = (e) => res(e.data);
@@ -1143,6 +1150,53 @@ export default function MarkTest() {
                         <h3>Upload Image</h3>
                         <p>Upload a photo or PDF from your gallery</p>
                     </div>
+
+                    {ENABLE_OPR_SCAN && (
+                        <div className="mark-option-card opr-beta" onClick={() => {
+                            const input = document.createElement('input');
+                            input.type = 'file';
+                            input.multiple = true;
+                            input.accept = 'image/*,application/pdf';
+                            input.onchange = async (e) => {
+                                const files = Array.from(e.target.files);
+                                if (files.length === 0 || !markingScheme) return;
+                                try {
+                                    setIsProcessing(true);
+                                    setProcessingError(null);
+                                    setScanComplete(null);
+                                    setScanMode('upload');
+                                    setProcessingStatus('Reading files for OPR...');
+                                    const imageObjects = await explodeFilesToImages(files, setProcessingStatus);
+                                    if (imageObjects.length === 0) throw new Error('No images found.');
+
+                                    // Mark as OPR engine
+                                    imageObjects.forEach(io => io.engine = 'opr');
+
+                                    setScanScriptCount(imageObjects.length);
+                                    startScanProgress(imageObjects.length);
+                                    const allBase64 = imageObjects.map(io => io.base64);
+                                    setBatchImages(allBase64);
+                                    setScannedImage(allBase64[0]);
+                                    const parsedBatch = await processScriptImages(imageObjects);
+                                    setCurrentReviewIndex(0);
+                                    setBatchResults([]);
+                                    setResults(null);
+                                    completeScan(parsedBatch);
+                                } catch (err) {
+                                    console.error('OPR Error:', err);
+                                    setIsProcessing(false);
+                                    setProcessingError({ title: 'OPR Scan Failed', message: err.message });
+                                }
+                            };
+                            input.click();
+                        }}>
+                            <div className="option-icon" style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-accent-primary)' }}>
+                                <Sparkles size={48} strokeWidth={1.5} />
+                            </div>
+                            <h3>OPR Scan (Beta)</h3>
+                            <p>Experimental first-principles OMR engine</p>
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -1373,6 +1427,26 @@ export default function MarkTest() {
                                                                     </div>
                                                                 ))}
                                                             </div>
+
+                                                            {tel.isOPR && tel.oprDetails && (
+                                                                <div style={{ marginTop: '12px', background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                                                    <p style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', marginBottom: '8px', textTransform: 'uppercase' }}>OPR Engine Details</p>
+                                                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                                                                        <div>
+                                                                            <div style={{ fontSize: '0.9rem', fontWeight: 700 }}>{tel.oprDetails.focus}</div>
+                                                                            <div style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Focus</div>
+                                                                        </div>
+                                                                        <div>
+                                                                            <div style={{ fontSize: '0.9rem', fontWeight: 700 }}>{tel.oprDetails.blankRate}</div>
+                                                                            <div style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Blank</div>
+                                                                        </div>
+                                                                        <div>
+                                                                            <div style={{ fontSize: '0.9rem', fontWeight: 700 }}>v{tel.oprDetails.version}</div>
+                                                                            <div style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Core</div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     )}
 

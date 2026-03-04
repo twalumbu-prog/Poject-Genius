@@ -10,6 +10,7 @@
  */
 
 export function computeScriptTelemetry(pageRegistrationResult, omrResponse, mergedAnswers, totalExpected) {
+    const isOPR = omrResponse?.telemetry?.opr_version !== undefined;
     const omrResults = omrResponse?.omrResults || [];
     const page_confidence = pageRegistrationResult?.page_confidence ?? 0;
     const blur_score = pageRegistrationResult?.blur_score ?? 1000;
@@ -91,7 +92,19 @@ export function computeScriptTelemetry(pageRegistrationResult, omrResponse, merg
         });
     }
 
+    if (isOPR) {
+        const oprTel = omrResponse.telemetry;
+        if (oprTel.quality?.focus_score < 100) {
+            review_flags.push({ code: 'OPR_LOW_FOCUS', severity: 'MEDIUM', message: 'OPR detected sub-optimal focus' });
+        }
+        if (oprTel.sanity?.needs_review) {
+            review_flags.push({ code: 'OPR_SANITY_FLAG', severity: 'HIGH', message: `OPR Sanity Check Failed: ${oprTel.sanity.issues.join(', ')}` });
+        }
+    }
+
     return {
+        is_opr: isOPR,
+        opr_telemetry: isOPR ? omrResponse.telemetry : null,
         page_confidence,
         blur_score,
         is_blurry,
@@ -135,7 +148,7 @@ function detectBlankRunInMiddle(answers, total) {
  */
 export function formatTelemetryForUI(telemetry) {
     if (!telemetry) return null;
-    return {
+    const base = {
         pageConfidence: `${Math.round(telemetry.page_confidence * 100)}%`,
         blurScore: telemetry.blur_score,
         isBlurry: telemetry.is_blurry,
@@ -146,5 +159,18 @@ export function formatTelemetryForUI(telemetry) {
         finalScriptConfidence: `${Math.round(telemetry.final_script_confidence * 100)}%`,
         needsHumanReview: telemetry.needs_human_review,
         reviewFlags: telemetry.review_flags,
+        isOPR: telemetry.is_opr,
     };
+
+    if (telemetry.is_opr && telemetry.opr_telemetry) {
+        const opr = telemetry.opr_telemetry;
+        base.oprDetails = {
+            focus: opr.quality?.focus_score,
+            glare: opr.quality?.glare_score,
+            blankRate: `${Math.round((opr.sanity?.blank_rate || 0) * 100)}%`,
+            version: opr.opr_version
+        };
+    }
+
+    return base;
 }
