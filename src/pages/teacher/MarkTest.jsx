@@ -1298,47 +1298,131 @@ export default function MarkTest() {
                                         </div>
                                     )}
 
-                                    {/* Part 6.2: AI Debug Panel — shown when Edge reports anomalies */}
+                                    {/* Part 6.2: Production Vision Telemetry Panel */}
                                     {(() => {
                                         const meta = reviewData._debugMeta;
                                         if (!meta) return null;
-                                        const hasAnomalies = meta.repaired_count > 0 || meta.duplicate_count > 0 || meta.validation_passed === false;
-                                        const hasLowConfidenceCluster = reviewData.studentAnswers?.filter(a => a.confidence === 'Low').length >= 3;
-                                        if (!hasAnomalies && !hasLowConfidenceCluster) return null;
+
+                                        const tel = meta.telemetry;
+                                        const flags = meta.review_flags || [];
+                                        const validation = meta.validation || {};
+                                        const needsReview = meta.needs_review || flags.some(f => f.severity === 'HIGH');
+                                        const hasLowConf = reviewData.studentAnswers?.filter(a => a.confidence === 'Low').length >= 3;
+
+                                        const hasTelemetryData = tel || flags.length > 0 || meta.repaired_count > 0 || meta.duplicate_count > 0 || !validation.count_match || needsReview;
+                                        if (!hasTelemetryData && !hasLowConf) return null;
+
+                                        const confColor = (val) => {
+                                            const n = parseInt(val);
+                                            if (n >= 80) return '#16a34a';
+                                            if (n >= 55) return '#d97706';
+                                            return '#dc2626';
+                                        };
+
+                                        const severityStyles = {
+                                            HIGH: { bg: '#fee2e2', color: '#7f1d1d', border: '#fca5a5', icon: '🔴' },
+                                            MEDIUM: { bg: '#fffbeb', color: '#78350f', border: '#fde68a', icon: '🟡' },
+                                            LOW: { bg: '#f0fdf4', color: '#14532d', border: '#86efac', icon: '🟢' },
+                                        };
+
                                         return (
-                                            <details style={{ marginTop: '20px', border: '1px solid #fbbf24', borderRadius: '8px', overflow: 'hidden' }}>
+                                            <details style={{ marginTop: '20px', border: `1px solid ${needsReview ? '#fca5a5' : '#fbbf24'}`, borderRadius: '10px', overflow: 'hidden' }}>
                                                 <summary style={{
                                                     padding: '12px 16px',
-                                                    background: '#fffbeb',
-                                                    color: '#92400e',
-                                                    cursor: 'pointer',
-                                                    fontWeight: 600,
-                                                    fontSize: '0.88rem',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '8px',
-                                                    listStyle: 'none'
+                                                    background: needsReview ? '#fff1f2' : '#fffbeb',
+                                                    color: needsReview ? '#881337' : '#92400e',
+                                                    cursor: 'pointer', fontWeight: 600, fontSize: '0.88rem',
+                                                    display: 'flex', alignItems: 'center', gap: '8px', listStyle: 'none'
                                                 }}>
                                                     <AlertCircle size={15} />
-                                                    AI Debug Details
+                                                    Vision Pipeline Telemetry
+                                                    {tel?.finalScriptConfidence && <span style={{ background: '#fff', border: `1px solid ${confColor(tel.finalScriptConfidence)}`, color: confColor(tel.finalScriptConfidence), padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 700 }}>Script: {tel.finalScriptConfidence}</span>}
+                                                    {needsReview && <span style={{ background: '#fecdd3', color: '#9f1239', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem' }}>⚠️ Review Required</span>}
                                                     {meta.repaired_count > 0 && <span style={{ background: '#fde68a', color: '#78350f', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem' }}>{meta.repaired_count} repaired</span>}
                                                     {meta.duplicate_count > 0 && <span style={{ background: '#fed7aa', color: '#7c2d12', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem' }}>{meta.duplicate_count} duplicates</span>}
-                                                    {hasLowConfidenceCluster && <span style={{ background: '#fee2e2', color: '#7f1d1d', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem' }}>Low confidence cluster</span>}
                                                 </summary>
-                                                <div style={{ padding: '16px', background: '#fefce8' }}>
-                                                    <table style={{ width: '100%', fontSize: '0.82rem', borderCollapse: 'collapse' }}>
-                                                        <tbody>
-                                                            <tr><td style={{ padding: '4px 8px', color: '#78350f', width: '60%' }}>Raw LLM answer count</td><td style={{ fontWeight: 600 }}>{meta.raw_llm_count ?? '—'}</td></tr>
-                                                            <tr><td style={{ padding: '4px 8px', color: '#78350f' }}>Auto-repaired missing answers</td><td style={{ fontWeight: 600, color: meta.repaired_count > 0 ? '#b45309' : '#16a34a' }}>{meta.repaired_count ?? '—'}</td></tr>
-                                                            <tr><td style={{ padding: '4px 8px', color: '#78350f' }}>Duplicate question numbers</td><td style={{ fontWeight: 600, color: meta.duplicate_count > 0 ? '#b45309' : '#16a34a' }}>{meta.duplicate_count ?? '—'}</td></tr>
-                                                            <tr><td style={{ padding: '4px 8px', color: '#78350f' }}>Edge validation passed</td><td style={{ fontWeight: 600, color: meta.validation_passed ? '#16a34a' : '#dc2626' }}>{meta.validation_passed === true ? 'Yes' : meta.validation_passed === false ? 'No' : '—'}</td></tr>
-                                                            <tr><td style={{ padding: '4px 8px', color: '#78350f' }}>Low confidence answers</td><td style={{ fontWeight: 600 }}>{reviewData.studentAnswers?.filter(a => a.confidence === 'Low').length ?? '—'}</td></tr>
-                                                        </tbody>
-                                                    </table>
-                                                    {meta.repaired_count > 0 && (
-                                                        <p style={{ marginTop: '10px', fontSize: '0.78rem', color: '#92400e', background: '#fde68a', padding: '8px 12px', borderRadius: '6px' }}>
-                                                            ⚠️ {meta.repaired_count} question(s) were not found in the AI response and were auto-filled as "Unanswered". Check the scan quality and re-scan if needed.
-                                                        </p>
+                                                <div style={{ padding: '16px', background: '#fffdf5', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+
+                                                    {/* Stage Confidence Metrics */}
+                                                    {tel && (
+                                                        <div>
+                                                            <p style={{ fontSize: '0.78rem', fontWeight: 700, color: '#4b5563', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Pipeline Confidence</p>
+                                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '8px' }}>
+                                                                {[
+                                                                    { label: 'Page Detection', val: tel.pageConfidence },
+                                                                    { label: 'OMR Clear Rate', val: tel.omrClearRate },
+                                                                    { label: 'Fallback Rate', val: tel.fallbackRate },
+                                                                    { label: 'Ambiguity Rate', val: tel.ambiguityRate },
+                                                                    { label: 'Script Confidence', val: tel.finalScriptConfidence },
+                                                                ].map(({ label, val }) => (
+                                                                    <div key={label} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '10px 12px', textAlign: 'center' }}>
+                                                                        <div style={{ fontSize: '1.2rem', fontWeight: 800, color: confColor(val) }}>{val ?? '—'}</div>
+                                                                        <div style={{ fontSize: '0.7rem', color: '#6b7280', marginTop: '2px' }}>{label}</div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Routing Breakdown */}
+                                                    {(meta.hybrid_omr_used != null || meta.hybrid_ocr_used != null) && (
+                                                        <div>
+                                                            <p style={{ fontSize: '0.78rem', fontWeight: 700, color: '#4b5563', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Routing Breakdown</p>
+                                                            <table style={{ width: '100%', fontSize: '0.82rem', borderCollapse: 'collapse' }}>
+                                                                <tbody>
+                                                                    <tr><td style={{ padding: '4px 8px', color: '#374151' }}>OMR (deterministic)</td><td style={{ fontWeight: 600, color: '#1d4ed8' }}>{meta.hybrid_omr_used ?? '—'}</td></tr>
+                                                                    <tr><td style={{ padding: '4px 8px', color: '#374151' }}>OCR / VLM fallback</td><td style={{ fontWeight: 600, color: '#7c3aed' }}>{meta.hybrid_ocr_used ?? '—'}</td></tr>
+                                                                    <tr><td style={{ padding: '4px 8px', color: '#374151' }}>Page confidence</td><td style={{ fontWeight: 600, color: confColor((meta.page_confidence * 100).toFixed(0) + '%') }}>{meta.page_confidence != null ? `${Math.round(meta.page_confidence * 100)}%` : '—'}</td></tr>
+                                                                    <tr><td style={{ padding: '4px 8px', color: '#374151' }}>Raw LLM answer count</td><td style={{ fontWeight: 600 }}>{meta.raw_llm_count ?? '—'}</td></tr>
+                                                                    <tr><td style={{ padding: '4px 8px', color: '#374151' }}>Auto-repaired answers</td><td style={{ fontWeight: 600, color: meta.repaired_count > 0 ? '#b45309' : '#16a34a' }}>{meta.repaired_count ?? '—'}</td></tr>
+                                                                    <tr><td style={{ padding: '4px 8px', color: '#374151' }}>Duplicate question numbers</td><td style={{ fontWeight: 600, color: meta.duplicate_count > 0 ? '#b45309' : '#16a34a' }}>{meta.duplicate_count ?? '—'}</td></tr>
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Merger Validation */}
+                                                    {validation && Object.keys(validation).length > 0 && (
+                                                        <div>
+                                                            <p style={{ fontSize: '0.78rem', fontWeight: 700, color: '#4b5563', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Merger Validation</p>
+                                                            <table style={{ width: '100%', fontSize: '0.82rem', borderCollapse: 'collapse' }}>
+                                                                <tbody>
+                                                                    <tr>
+                                                                        <td style={{ padding: '4px 8px', color: '#374151' }}>Answer count</td>
+                                                                        <td style={{ fontWeight: 600, color: validation.count_match ? '#16a34a' : '#dc2626' }}>
+                                                                            {validation.actual_count} / {validation.expected_count} {validation.count_match ? '✓' : '⚠ Mismatch'}
+                                                                        </td>
+                                                                    </tr>
+                                                                    {validation.duplicates?.length > 0 && (
+                                                                        <tr><td style={{ padding: '4px 8px', color: '#374151' }}>Duplicate Qs</td><td style={{ fontWeight: 600, color: '#dc2626' }}>{validation.duplicates.join(', ')}</td></tr>
+                                                                    )}
+                                                                    {validation.all_same_answer && (
+                                                                        <tr><td colSpan={2} style={{ padding: '4px 8px', color: '#7f1d1d', background: '#fee2e2', borderRadius: '4px' }}>⚠️ All answers are the same — possible pattern error</td></tr>
+                                                                    )}
+                                                                    {validation.too_many_blanks && (
+                                                                        <tr><td colSpan={2} style={{ padding: '4px 8px', color: '#7f1d1d', background: '#fee2e2', borderRadius: '4px' }}>⚠️ {Math.round(validation.blank_ratio * 100)}% of questions are blank — possible page issue</td></tr>
+                                                                    )}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Automated Review Flags */}
+                                                    {flags.length > 0 && (
+                                                        <div>
+                                                            <p style={{ fontSize: '0.78rem', fontWeight: 700, color: '#4b5563', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Automated Review Flags</p>
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                                                {flags.map((flag, fi) => {
+                                                                    const s = severityStyles[flag.severity] || severityStyles.MEDIUM;
+                                                                    return (
+                                                                        <div key={fi} style={{ background: s.bg, border: `1px solid ${s.border}`, borderRadius: '6px', padding: '8px 12px', fontSize: '0.8rem', color: s.color, display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                                                                            <span style={{ flexShrink: 0 }}>{s.icon}</span>
+                                                                            <span><strong>{flag.code}:</strong> {flag.message}</span>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
                                                     )}
                                                 </div>
                                             </details>
