@@ -88,12 +88,17 @@ export function computeGrayscale(imageData) {
 }
 
 // 1A. Smart Binarization using Integral Image (Bradley Adaptive)
+// 1A. Smart Binarization using Integral Image (Bradley Adaptive)
 export function binarizeAdaptive(grayArray, width, height) {
+    // Stage A.0: Illumination Surface Normalization
+    // Estimate background with a very large kernel box blur (approx 1/10th image width)
+    const normalizedGray = normalizeIllumination(grayArray, width, height);
+
     const integral = new Uint32Array(width * height);
     for (let y = 0; y < height; y++) {
         let sum = 0;
         for (let x = 0; x < width; x++) {
-            sum += grayArray[y * width + x];
+            sum += normalizedGray[y * width + x];
             integral[y * width + x] = sum + (y > 0 ? integral[(y - 1) * width + x] : 0);
         }
     }
@@ -102,7 +107,7 @@ export function binarizeAdaptive(grayArray, width, height) {
     // window size clamp based on dimensions
     const s = Math.max(12, Math.min(40, Math.floor(Math.min(width, height) / 40)));
     const s2 = Math.floor(s / 2);
-    const t = 15; // 15% darker than average to be ink
+    const t = 12; // Adjusted sensitivity after normalization
 
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
@@ -119,7 +124,7 @@ export function binarizeAdaptive(grayArray, width, height) {
 
             const mean = sum / count;
 
-            if (grayArray[y * width + x] < mean * ((100 - t) / 100)) {
+            if (normalizedGray[y * width + x] < mean * ((100 - t) / 100)) {
                 binary[y * width + x] = 1; // ink
             } else {
                 binary[y * width + x] = 0; // paper
@@ -127,6 +132,73 @@ export function binarizeAdaptive(grayArray, width, height) {
         }
     }
     return binary;
+}
+
+function normalizeIllumination(gray, w, h) {
+    const kernelSize = Math.floor(w / 10);
+    // 3-pass box blur approximates Gaussian O(N)
+    const background = boxBlur(gray, w, h, kernelSize);
+    const background2 = boxBlur(background, w, h, kernelSize);
+
+    const out = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+        const pixel = gray[i];
+        const bg = background2[i];
+        // Normalize: pixel / bg * 255 (using 128 as neutral offset for stability)
+        // new = original - blurred + 192 (high offset to keep it bright)
+        const val = pixel - bg + 192;
+        out[i] = Math.max(0, Math.min(255, val));
+    }
+    return out;
+}
+
+function boxBlur(src, w, h, r) {
+    const dst = new Uint8Array(w * h);
+    const val = 1 / (r + r + 1);
+
+    // Horizontal pass
+    for (let y = 0; y < h; y++) {
+        let ix = y * w;
+        let ly = y * w;
+        let fv = src[ix];
+        let lv = src[ix + w - 1];
+        let li = fv * (r + 1);
+        for (let j = 0; j < r; j++) li += src[ix + j];
+        for (let j = 0; j <= r; j++) {
+            li += src[ix + j + r] - fv;
+            dst[ly++] = li * val;
+        }
+        for (let j = r + 1; j < w - r; j++) {
+            li += src[ix + j + r] - src[ix + j - r - 1];
+            dst[ly++] = li * val;
+        }
+        for (let j = w - r; j < w; j++) {
+            li += lv - src[ix + j - r - 1];
+            dst[ly++] = li * val;
+        }
+    }
+
+    // Vertical pass
+    const final = new Uint8Array(w * h);
+    for (let x = 0; x < w; x++) {
+        let fv = dst[x];
+        let lv = dst[x + (h - 1) * w];
+        let li = fv * (r + 1);
+        for (let j = 0; j < r; j++) li += dst[x + j * w];
+        for (let j = 0; j <= r; j++) {
+            li += dst[x + (j + r) * w] - fv;
+            final[x + j * w] = li * val;
+        }
+        for (let j = r + 1; j < h - r; j++) {
+            li += dst[x + (j + r) * w] - dst[x + (j - r - 1) * w];
+            final[x + j * w] = li * val;
+        }
+        for (let j = h - r; j < h; j++) {
+            li += lv - dst[x + (j - r - 1) * w];
+            final[x + j * w] = li * val;
+        }
+    }
+    return final;
 }
 
 // 2. Vertical Projection for Multi-column detection (Guardrail)
@@ -425,7 +497,21 @@ export async function classifyQuestionRegions(imageBitmap, markingSchemeCount) {
     const gray = computeGrayscale(finalImageData);
     const binary = binarizeAdaptive(gray, width, height);
 
-    // 2. Horizontal Slicing
+    // 2. Vertical Projection for Multi-column Guardrail
+    const vProfile = computeVerticalProjection(binary, width, height);
+    const isMultiColumn = detectMultiColumn(vProfile, height);
+
+    if (isMultiColumn) {
+        console.warn("[Stage A] Multi-column layout detected via vertical projection. Routing to high-level fallback.");
+        return {
+            layout: 'multi-column',
+            confidence: 0.4, // Force fallback for safety in multi-column
+            regions: [],
+            correctedImageData: finalImageData
+        };
+    }
+
+    // 3. Horizontal Slicing
     const hProfile = computeHorizontalProjection(binary, width, height);
     const slices = sliceROIsViaHPP(hProfile, height);
     console.log(`[Stage A] Found ${slices.length} distinct horizontal regions across ${height}px height.`);

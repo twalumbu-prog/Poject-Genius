@@ -25,8 +25,11 @@ function processPage(imageBitmap) {
     sCtx.drawImage(imageBitmap, 0, 0, sw, sh);
     const smallImgData = sCtx.getImageData(0, 0, sw, sh);
 
-    // 0.1 Edge Detection
+    // 0.1 Blur Detection (Variance of Laplacian)
     const gray = computeGrayscale(smallImgData);
+    const blurScore = computeLaplacianVariance(gray, sw, sh);
+    const isBlurry = blurScore < 100; // Threshold 100 is standard for mobile blur
+
     const blurred = gaussianBlur(gray, sw, sh);
     const edges = computeSobel(blurred, sw, sh);
 
@@ -78,8 +81,10 @@ function processPage(imageBitmap) {
         return {
             page_detected: true,
             page_confidence: bestQuad.confidence,
+            blur_score: Math.round(blurScore),
+            is_blurry: isBlurry,
             quad_points: originalQuad,
-            warpedImageData: warpedImageData, // This is an ImageData object
+            warpedImageData: warpedImageData,
             processingTimeMs: Math.round(t1 - t0)
         };
     } else {
@@ -88,6 +93,8 @@ function processPage(imageBitmap) {
         return {
             page_detected: false,
             page_confidence: bestQuad ? bestQuad.confidence : 0,
+            blur_score: Math.round(blurScore),
+            is_blurry: isBlurry,
             quad_points: null,
             warpedImageData: null,
             processingTimeMs: Math.round(t1 - t0)
@@ -123,6 +130,28 @@ function gaussianBlur(gray, width, height) {
         }
     }
     return out;
+}
+
+function computeLaplacianVariance(gray, w, h) {
+    // 3x3 Laplacian Kernel
+    // [ 0,  1, 0]
+    // [ 1, -4, 1]
+    // [ 0,  1, 0]
+    let sum = 0;
+    let sumSq = 0;
+    const n = (w - 2) * (h - 2);
+
+    for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+            const i = y * w + x;
+            const lap = gray[i - w] + gray[i + w] + gray[i - 1] + gray[i + 1] - 4 * gray[i];
+            sum += lap;
+            sumSq += lap * lap;
+        }
+    }
+    const mean = sum / n;
+    const variance = (sumSq / n) - (mean * mean);
+    return variance;
 }
 
 function computeSobel(gray, width, height) {
@@ -222,7 +251,7 @@ function extractQuadCorners(contour) {
 function validateQuad(quad, width, height) {
     const [tl, tr, br, bl] = quad;
 
-    // Area via Shoelace (must be ≥ 35% of image)
+    // 1. Area via Shoelace (must be ≥ 35% of image)
     const area = 0.5 * Math.abs(
         (tl.x * tr.y - tr.x * tl.y) +
         (tr.x * br.y - br.x * tr.y) +
@@ -232,7 +261,30 @@ function validateQuad(quad, width, height) {
     const imgArea = width * height;
     if (area < imgArea * 0.35) return { valid: false };
 
-    // Aspect Ratio & Edges
+    // 2. Corner Orthogonality (Rectangularity)
+    // Check angles at corners (should be near 90°)
+    const angleAt = (p1, p2, p3) => {
+        const v1 = { x: p1.x - p2.x, y: p1.y - p2.y };
+        const v2 = { x: p3.x - p2.x, y: p3.y - p2.y };
+        const dot = v1.x * v2.x + v1.y * v2.y;
+        const mag1 = Math.hypot(v1.x, v1.y);
+        const mag2 = Math.hypot(v2.x, v2.y);
+        if (mag1 === 0 || mag2 === 0) return 0;
+        return Math.acos(Math.max(-1, Math.min(1, dot / (mag1 * mag2)))) * (180 / Math.PI);
+    };
+
+    const a1 = angleAt(bl, tl, tr);
+    const a2 = angleAt(tl, tr, br);
+    const a3 = angleAt(tr, br, bl);
+    const a4 = angleAt(br, bl, tl);
+
+    // Sum of deviations from 90 deg
+    const dev = (Math.abs(90 - a1) + Math.abs(90 - a2) + Math.abs(90 - a3) + Math.abs(90 - a4)) / 4;
+    const orthoSCORE = Math.max(0, 1.0 - dev / 45); // score 1.0 at perfect 90, 0.0 at 45 deg deviation
+
+    if (dev > 25) return { valid: false }; // Too skewed to be a legit page
+
+    // 3. Aspect Ratio
     const dTop = Math.hypot(tr.x - tl.x, tr.y - tl.y);
     const dBot = Math.hypot(br.x - bl.x, br.y - bl.y);
     const dLeft = Math.hypot(bl.x - tl.x, bl.y - tl.y);
@@ -242,13 +294,12 @@ function validateQuad(quad, width, height) {
     const avgH = (dLeft + dRight) / 2;
     if (avgW === 0 || avgH === 0) return { valid: false };
 
-    // Most documents are taller than wide in portrait (1.414). Could be landscape.
     const aspectRatio = avgH / avgW;
     const isPortrait = aspectRatio >= 0.6 && aspectRatio <= 1.6;
     const isLandscape = (1 / aspectRatio) >= 0.6 && (1 / aspectRatio) <= 1.6;
     if (!isPortrait && !isLandscape) return { valid: false };
 
-    // Convexity: cross products of adjacent edges must not change sign (all positive or all negative)
+    // 4. Convexity
     const cross = (p1, p2, p3) => (p2.x - p1.x) * (p3.y - p2.y) - (p2.y - p1.y) * (p3.x - p2.x);
     const c1 = cross(bl, tl, tr);
     const c2 = cross(tl, tr, br);
@@ -257,12 +308,46 @@ function validateQuad(quad, width, height) {
     const isConvex = (c1 >= 0 && c2 >= 0 && c3 >= 0 && c4 >= 0) || (c1 <= 0 && c2 <= 0 && c3 <= 0 && c4 <= 0);
     if (!isConvex) return { valid: false };
 
-    // Confidence heuristic based on area coverage and rectangularity
-    const coverageScore = Math.min(1.0, area / (imgArea * 0.9)); // up to 90%
-    const rectangularityScore = 1.0 - Math.abs(1.0 - Math.min(dTop / dBot, dBot / dTop)) - Math.abs(1.0 - Math.min(dLeft / dRight, dRight / dLeft));
-    const confidence = Math.max(0, Math.min(1, (coverageScore * 0.6) + (rectangularityScore * 0.4)));
+    // 5. Edge Density Consistency
+    // Ensure that the edges of the quad actually follow high-gradient paths
+    const edgeDensity = checkEdgeDensity(edges, quad, sw, sh);
+    if (edgeDensity < 0.4) return { valid: false }; // At least 40% of the border must be on a strong edge
 
-    return { valid: true, area, confidence };
+    // 6. Final Rigorous Confidence
+    const coverageScore = Math.min(1.0, area / (imgArea * 0.9));
+    const rectangularityScore = 1.0 - Math.abs(1.0 - Math.min(dTop / dBot, dBot / dTop)) - Math.abs(1.0 - Math.min(dLeft / dRight, dRight / dLeft));
+
+    // Combine metrics: coverage (0.2), rectangularity (0.2), orthogonality (0.3), edgeDensity (0.3)
+    const confidence = (coverageScore * 0.2) + (rectangularityScore * 0.2) + (orthoSCORE * 0.3) + (edgeDensity * 0.3);
+
+    return { valid: true, area, confidence: Math.max(0, Math.min(1, confidence)) };
+}
+
+function checkEdgeDensity(edges, quad, w, h) {
+    let hits = 0;
+    let totalSamples = 0;
+    const [tl, tr, br, bl] = quad;
+
+    const sampleLine = (p1, p2) => {
+        const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        const steps = Math.floor(dist / 2); // sample every 2 pixels
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const x = Math.round(p1.x + (p2.x - p1.x) * t);
+            const y = Math.round(p1.y + (p2.y - p1.y) * t);
+            if (x >= 0 && x < w && y >= 0 && y < h) {
+                totalSamples++;
+                if (edges[y * w + x] === 255) hits++;
+            }
+        }
+    };
+
+    sampleLine(tl, tr);
+    sampleLine(tr, br);
+    sampleLine(br, bl);
+    sampleLine(bl, tl);
+
+    return totalSamples === 0 ? 0 : hits / totalSamples;
 }
 
 // Math solver for perspective warp

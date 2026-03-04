@@ -12,6 +12,8 @@
 export function computeScriptTelemetry(pageRegistrationResult, omrResponse, mergedAnswers, totalExpected) {
     const omrResults = omrResponse?.omrResults || [];
     const page_confidence = pageRegistrationResult?.page_confidence ?? 0;
+    const blur_score = pageRegistrationResult?.blur_score ?? 1000;
+    const is_blurry = pageRegistrationResult?.is_blurry ?? false;
     const layout_confidence = omrResponse?.layoutResult?.regions?.length > 0 ? 0.9 : 0.4;
 
     // OMR Clear Rate: proportion of OMR questions classified as "clear"
@@ -27,9 +29,10 @@ export function computeScriptTelemetry(pageRegistrationResult, omrResponse, merg
     const fallback_rate = totalExpected > 0 ? fallbackCount / totalExpected : 0;
 
     // Overall confidence heuristic
-    // Penalise for low page registration, high fallback, high ambiguity
-    let final_script_confidence = 0.95;
+    // Penalize for low page registration, blur, high fallback, high ambiguity
+    let final_script_confidence = 0.98;
     final_script_confidence -= (1 - page_confidence) * 0.15;
+    final_script_confidence -= (is_blurry ? 0.2 : 0);
     final_script_confidence -= fallback_rate * 0.2;
     final_script_confidence -= ambiguity_rate * 0.15;
     final_script_confidence -= (1 - omr_clear_rate) * 0.1;
@@ -43,6 +46,14 @@ export function computeScriptTelemetry(pageRegistrationResult, omrResponse, merg
             code: 'LOW_PAGE_CONFIDENCE',
             severity: 'HIGH',
             message: `Page not cleanly detected (${Math.round(page_confidence * 100)}%). Perspective warp may be skipped. All results may be misaligned.`
+        });
+    }
+
+    if (is_blurry) {
+        review_flags.push({
+            code: 'IMAGE_BLURRY',
+            severity: 'HIGH',
+            message: `Detected motion or focus blur (Score: ${Math.round(blur_score)}). Results may be unreliable.`
         });
     }
 
@@ -82,6 +93,8 @@ export function computeScriptTelemetry(pageRegistrationResult, omrResponse, merg
 
     return {
         page_confidence,
+        blur_score,
+        is_blurry,
         layout_confidence,
         omr_clear_rate,
         fallback_rate,
@@ -124,6 +137,8 @@ export function formatTelemetryForUI(telemetry) {
     if (!telemetry) return null;
     return {
         pageConfidence: `${Math.round(telemetry.page_confidence * 100)}%`,
+        blurScore: telemetry.blur_score,
+        isBlurry: telemetry.is_blurry,
         layoutConfidence: `${Math.round(telemetry.layout_confidence * 100)}%`,
         omrClearRate: `${Math.round(telemetry.omr_clear_rate * 100)}%`,
         fallbackRate: `${Math.round(telemetry.fallback_rate * 100)}%`,

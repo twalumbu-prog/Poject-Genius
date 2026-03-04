@@ -27,12 +27,21 @@ self.onmessage = async (e) => {
                 const imageData = layoutResult.correctedImageData;
                 const width = imageData.width;
 
-                // B.0 Compute page-level darkness calibration (for adaptive thresholds)
+                // B.0 Compute page-level darkness calibration
                 const pageCalibration = computePageCalibration(imageData.data, width, imageData.height);
 
+                // B.0.1 LEARN GRID MODEL (Enterprise Grade)
+                // Filter for high-confidence OMR rows to derive the geometric expected model
+                const omrRegions = layoutResult.regions.filter(r => r.type === 'omr' && r.confidence > 0.6);
+                const gridModel = learnGridModel(omrRegions);
+
                 for (const roi of layoutResult.regions) {
-                    if (roi.type === 'omr' && roi.confidence > 0.5) {
-                        const result = processOMRQuestion(imageData, width, roi, pageCalibration);
+                    if (roi.type === 'omr') {
+                        // B.1.1 GEOMETRIC ENFORCEMENT: 
+                        // If circles are missing, use gridModel to re-project them.
+                        const enforcedROI = enforceGridGeometry(roi, gridModel);
+
+                        const result = processOMRQuestion(imageData, width, enforcedROI, pageCalibration);
                         omrResults.push(result);
                     }
                 }
@@ -106,17 +115,15 @@ const optionsArray = ['A', 'B', 'C', 'D', 'E'];
 
 function processOMRQuestion(imageData, fullWidth, roi, pageCalibration) {
     const data = imageData.data;
-    const fillRatios = {};
-    const bubbles = roi.omr_options;
+    const bubbleMetrics = [];
+    const bubbles = roi.circleBlobs || [];
     const { thresholds } = pageCalibration;
 
     for (let i = 0; i < bubbles.length && i < optionsArray.length; i++) {
         const bubble = bubbles[i];
         const letter = optionsArray[i];
 
-        // B.1 Bubble Interior Masking:
-        // Erode bubble bounding box inward to ignore the thick printed circle border.
-        // 25% erosion gets us past the circle ring into the pure interior.
+        // Bubble Interior Masking
         const bw = bubble.maxX - bubble.minX;
         const bh = bubble.maxY - bubble.minY;
         const padX = Math.round(bw * 0.25);
@@ -128,73 +135,109 @@ function processOMRQuestion(imageData, fullWidth, roi, pageCalibration) {
         const inMaxY = bubble.maxY - padY;
 
         if (inMaxX <= inMinX || inMaxY <= inMinY) {
-            fillRatios[letter] = 0;
+            bubbleMetrics.push({ letter, ratio: 0, meanIntensity: 255 });
             continue;
         }
 
-        const { darkCount, totalCount } = countInteriorDarkPixels(data, fullWidth, inMinX, inMaxX, inMinY, inMaxY, thresholds.dark_luma);
-        const ratio = totalCount > 0 ? darkCount / totalCount : 0;
-        fillRatios[letter] = ratio;
+        const metrics = sampleBubbleInterior(data, fullWidth, inMinX, inMaxX, inMinY, inMaxY, thresholds.dark_luma);
+        bubbleMetrics.push({ letter, ...metrics });
     }
 
-    return decideBubbleAnswer(roi.inferred_question_number, fillRatios, thresholds, roi.confidence);
+    // B.1.2 LOCAL Z-SCORE SCORING (Pressure Invariant)
+    // Compute row statistics for relative darkness comparison
+    const intensities = bubbleMetrics.map(m => m.meanIntensity);
+    const rowMean = intensities.reduce((a, b) => a + b, 0) / intensities.length;
+    const rowStd = Math.sqrt(intensities.map(x => Math.pow(x - rowMean, 2)).reduce((a, b) => a + b, 0) / intensities.length) || 1;
+
+    const fillRatios = {};
+    const zScores = {};
+    for (const m of bubbleMetrics) {
+        fillRatios[m.letter] = m.ratio;
+        // Z-Score: More negative = Darker than neighbors. 
+        // We invert it so higher = darker/stronger answer.
+        zScores[m.letter] = (rowMean - m.meanIntensity) / rowStd;
+    }
+
+    return decideBubbleAnswer(roi.inferred_question_number, fillRatios, zScores, thresholds, roi.confidence);
 }
 
-// ─── B.2 INTERIOR PIXEL COUNTING ──────────────────────────────────────────
+// ─── B.2 INTERIOR SAMPLING (DETAILED) ────────────────────────────────────
 
-function countInteriorDarkPixels(data, fullWidth, minX, maxX, minY, maxY, darkLumaThreshold) {
+function sampleBubbleInterior(data, fullWidth, minX, maxX, minY, maxY, darkLumaThreshold) {
     let darkCount = 0;
     let totalCount = 0;
+    let sumIntensity = 0;
 
     for (let y = minY; y <= maxY; y++) {
         for (let x = minX; x <= maxX; x++) {
             const idx = (y * fullWidth + x) * 4;
             const luma = data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
             if (luma < darkLumaThreshold) darkCount++;
+            sumIntensity += luma;
             totalCount++;
         }
     }
-    return { darkCount, totalCount };
+    return {
+        ratio: totalCount > 0 ? darkCount / totalCount : 0,
+        meanIntensity: totalCount > 0 ? sumIntensity / totalCount : 255
+    };
 }
 
 // ─── B.3 STRICT DECISION LOGIC ────────────────────────────────────────────
 
-function decideBubbleAnswer(questionNumber, fillRatios, thresholds, roiConfidence) {
+function decideBubbleAnswer(questionNumber, fillRatios, zScores, thresholds, roiConfidence) {
     const letters = Object.keys(fillRatios);
 
     if (letters.length === 0) {
         return { question_number: questionNumber, detected_answer: null, method: 'omr', confidence: 0, fill_ratios: {}, status: 'blank' };
     }
 
-    letters.sort((a, b) => fillRatios[b] - fillRatios[a]);
+    // PRIMARY SIGNAL: Z-Score (Relative darkness in row)
+    // SECONDARY SIGNAL: Fill Ratio (Absolute ink presence)
+    letters.sort((a, b) => {
+        // Tie-breaker using fill ratio if Z-scores are extremely close
+        if (Math.abs(zScores[b] - zScores[a]) < 0.15) return fillRatios[b] - fillRatios[a];
+        return zScores[b] - zScores[a];
+    });
 
-    const max_ratio = fillRatios[letters[0]];
-    const second_ratio = letters.length > 1 ? fillRatios[letters[1]] : 0;
+    const bestLetter = letters[0];
+    const secondLetter = letters[1];
+
+    const max_ratio = fillRatios[bestLetter];
+    const max_z = zScores[bestLetter];
+
+    const second_ratio = letters.length > 1 ? fillRatios[secondLetter] : 0;
+    const second_z = letters.length > 1 ? zScores[secondLetter] : 0;
+
     const margin = max_ratio - second_ratio;
+    const z_margin = max_z - second_z;
 
     let status = 'ambiguous';
     let answer = null;
     let confidence = 0;
 
-    // Strict Ambiguity Conditions. ANY of these being true forces ambiguous.
-    const isBlank = max_ratio < thresholds.blank_fill;
-    const isMarginTooNarrow = margin < thresholds.ambiguous_margin;
-    const isMultipleFilled = letters.filter(l => fillRatios[l] > thresholds.blank_fill * 1.5).length > 1;
-    const isROIUnconfident = roiConfidence < 0.55;
+    // Strict Conditions:
+    const isBlank = max_ratio < thresholds.blank_fill && max_z < 0.8;
+    const isVeryStrong = max_z > 2.0 && z_margin > 1.2;
+    const isClearByRatio = max_ratio >= thresholds.clear_fill && margin >= thresholds.clear_margin;
+
+    // Confusion guards
+    const isMultiFilled = letters.filter(l => fillRatios[l] > thresholds.blank_fill * 1.5 || zScores[l] > 1.0).length > 1;
+    const isMarginNarrow = z_margin < 0.7;
 
     if (isBlank) {
         status = 'blank';
-    } else if (isROIUnconfident || isMarginTooNarrow || isMultipleFilled) {
-        // Force to VLM fallback — do NOT guess
+    } else if (isMultiFilled && !isVeryStrong) {
         status = 'ambiguous';
-    } else if (max_ratio >= thresholds.clear_fill && margin >= thresholds.clear_margin) {
+    } else if (isVeryStrong || (isClearByRatio && !isMarginNarrow)) {
         status = 'clear';
-        answer = letters[0];
-        confidence = Math.min(1.0, 0.65 + margin * 2 + roiConfidence * 0.2);
-    } else if (max_ratio >= thresholds.blank_fill * 1.5 && margin >= thresholds.clear_margin) {
-        // Light mark but decisive margin — lower confidence clear
+        answer = bestLetter;
+        // Compute confidence based on both signals
+        confidence = Math.min(1.0, 0.5 + (z_margin * 0.2) + (margin * 1.5));
+    } else if (max_z > 1.5 && z_margin > 0.8) {
+        // High relative darkness even if low absolute ratio (faint mark)
         status = 'clear';
-        answer = letters[0];
+        answer = bestLetter;
         confidence = 0.55;
     }
 
@@ -204,13 +247,83 @@ function decideBubbleAnswer(questionNumber, fillRatios, thresholds, roiConfidenc
         method: 'omr',
         confidence,
         fill_ratios: fillRatios,
+        z_scores: zScores,
         status,
-        // Telemetry pass-through
         _telemetry: {
             max_ratio: parseFloat(max_ratio.toFixed(4)),
-            margin: parseFloat(margin.toFixed(4)),
-            is_multi_filled: isMultipleFilled,
+            max_z: parseFloat(max_z.toFixed(2)),
+            z_margin: parseFloat(z_margin.toFixed(2)),
             roi_confidence: parseFloat(roiConfidence.toFixed(3)),
         }
     };
+}
+
+// ─── B.4 GRID MODELING (ENTERPRISE GRADE) ────────────────────────────────
+
+function learnGridModel(omrRegions) {
+    if (omrRegions.length < 2) return null;
+
+    const widths = [];
+    const gaps = [];
+    const heights = [];
+
+    for (const r of omrRegions) {
+        heights.push(r.height);
+        const circles = r.circleBlobs || [];
+        if (circles.length > 1) {
+            for (let i = 0; i < circles.length; i++) {
+                widths.push(circles[i].maxX - circles[i].minX);
+                if (i > 0) gaps.push(circles[i].minX - circles[i - 1].maxX);
+            }
+        }
+    }
+
+    const median = (arr) => {
+        if (arr.length === 0) return 0;
+        arr.sort((a, b) => a - b);
+        return arr[Math.floor(arr.length / 2)];
+    };
+
+    return {
+        avg_width: median(widths) || 25,
+        avg_gap: median(gaps) || 15,
+        avg_height: median(heights) || 35,
+        total_options: 4 // Standard for this project
+    };
+}
+
+function enforceGridGeometry(roi, model) {
+    if (!model || !roi.circleBlobs || roi.circleBlobs.length === model.total_options) {
+        return roi;
+    }
+
+    // Force projection if bubbles are missing
+    const circles = [...roi.circleBlobs].sort((a, b) => a.minX - b.minX);
+    const newCircles = [];
+
+    // Heuristic: Use the leftmost circle as an anchor
+    const anchor = circles[0];
+    const unitStep = model.avg_width + model.avg_gap;
+
+    for (let i = 0; i < model.total_options; i++) {
+        // Assume first circle is option A (index 0) or close to it
+        // This is a simplification; a more robust one aligns circles to best-fit X-positions
+        const expectedX = anchor.minX + i * unitStep;
+
+        // Find if we have a circle near expectedX
+        const matched = circles.find(c => Math.abs(c.minX - expectedX) < model.avg_width * 0.6);
+        if (matched) {
+            newCircles.push(matched);
+        } else {
+            // RE-PROJECT MISSING BUBBLE
+            newCircles.push({
+                minX: expectedX,
+                maxX: expectedX + model.avg_width,
+                minY: roi.y,
+                maxY: roi.y + model.avg_height
+            });
+        }
+    }
+
+    return { ...roi, circleBlobs: newCircles };
 }

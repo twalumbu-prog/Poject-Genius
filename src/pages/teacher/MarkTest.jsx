@@ -1350,13 +1350,14 @@ export default function MarkTest() {
                                                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '8px' }}>
                                                                 {[
                                                                     { label: 'Page Detection', val: tel.pageConfidence },
+                                                                    { label: 'Blur (Focus) Score', val: tel.blurScore },
                                                                     { label: 'OMR Clear Rate', val: tel.omrClearRate },
                                                                     { label: 'Fallback Rate', val: tel.fallbackRate },
                                                                     { label: 'Ambiguity Rate', val: tel.ambiguityRate },
                                                                     { label: 'Script Confidence', val: tel.finalScriptConfidence },
                                                                 ].map(({ label, val }) => (
                                                                     <div key={label} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '10px 12px', textAlign: 'center' }}>
-                                                                        <div style={{ fontSize: '1.2rem', fontWeight: 800, color: confColor(val) }}>{val ?? '—'}</div>
+                                                                        <div style={{ fontSize: '1.2rem', fontWeight: 800, color: label.includes('Blur') ? (val < 100 ? '#dc2626' : '#16a34a') : confColor(val) }}>{val ?? '—'}</div>
                                                                         <div style={{ fontSize: '0.7rem', color: '#6b7280', marginTop: '2px' }}>{label}</div>
                                                                     </div>
                                                                 ))}
