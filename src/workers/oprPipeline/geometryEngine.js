@@ -56,6 +56,11 @@ function warpPerspective(src, srcQuad, dstW, dstH) {
     const srcH = src.height;
     const srcD = src.data;
 
+    if (srcD.length === 0) {
+        console.error('[OPR Geometry] Source data is empty');
+        return new ImageData(dstD, dstW, dstH);
+    }
+
     for (let y = 0; y < dstH; y++) {
         for (let x = 0; x < dstW; x++) {
             const den = invMat[6] * x + invMat[7] * y + 1;

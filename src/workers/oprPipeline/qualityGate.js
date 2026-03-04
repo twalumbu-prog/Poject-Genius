@@ -15,6 +15,8 @@ export function checkQuality(imageData) {
     // 3. Glare Detection (High-saturation white clusters)
     const glareScore = detectGlare(data, width, height);
 
+    console.log(`[OPR Quality] Blur: ${Math.round(blurScore)}, Glare: ${(glareScore * 100).toFixed(2)}%`);
+
     const ACCEPTABLE_BLUR = 80; // Standard threshold
     const MAX_GLARE_RATIO = 0.05; // 5% of pixels
 

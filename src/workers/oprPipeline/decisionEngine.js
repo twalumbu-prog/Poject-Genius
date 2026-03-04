@@ -6,6 +6,7 @@ export function decideRows(classifiedBubbles, totalQuestions) {
 
     // 1. Group by question number
     classifiedBubbles.forEach(b => {
+        if (!b || b.q_num === undefined) return;
         if (!rows[b.q_num]) rows[b.q_num] = [];
         rows[b.q_num].push(b);
     });

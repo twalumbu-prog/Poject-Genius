@@ -6,6 +6,7 @@ import { explodeFilesToImages, processForVLM, blobToBase64 } from '../../utils/i
 import { normalizeQuestionNumber } from '../../utils/ocrValidation';
 import { mergeHybridAnswers } from '../../utils/hybridAnswerMerger';
 import { computeScriptTelemetry, formatTelemetryForUI } from '../../utils/visionTelemetry';
+import { logAccuracyComparison } from '../../utils/oprAccuracyDebugger';
 import './Page.css';
 
 const ENABLE_OPR_SCAN = true;
@@ -295,7 +296,10 @@ export default function MarkTest() {
 
                     const omrPromise = new Promise((res, rej) => {
                         omrWorker.onmessage = (e) => res(e.data);
-                        omrWorker.onerror = (err) => rej(err);
+                        omrWorker.onerror = (err) => {
+                            console.error('[OPR Worker Error Event]', err);
+                            rej(new Error(`Worker Load/Runtime Error at line ${err.lineno}: ${err.message}`));
+                        };
                     });
 
                     omrWorker.postMessage({
@@ -309,10 +313,35 @@ export default function MarkTest() {
                     omrWorker.terminate();
 
                     if (!omrResponse.success) {
-                        console.warn(`[OMR] Worker failed for script ${index + 1}: ${omrResponse.error}. Falling back to full OCR.`);
+                        console.warn(`[${engine.toUpperCase()}] Worker failed for script ${index + 1}: ${omrResponse.error}. Falling back to full OCR.`);
+                        if (omrResponse.stack) console.error(`[${engine.toUpperCase()} Stack]`, omrResponse.stack);
                     }
 
-                    const omrResults = omrResponse.omrResults || [];
+                    let omrResults = omrResponse.omrResults || [];
+
+                    // --- ACCURACY COMPARISON (DEV ONLY) ---
+                    if (engine === 'opr' && import.meta.env.DEV) {
+                        try {
+                            console.log('[DEBUG] Running Legacy OMR in parallel for comparison...');
+                            const legacyWorker = new Worker(new URL('../../workers/omrWorker.js', import.meta.url), { type: 'module' });
+                            const legacyResponse = await new Promise((res) => {
+                                legacyWorker.onmessage = (e) => res(e.data);
+                                legacyWorker.postMessage({
+                                    messageType: 'PROCESS_OMR',
+                                    id: 'comparison',
+                                    imageBitmap: finalImageBitmap,
+                                    markingSchemeCount: markingScheme.questions.length
+                                });
+                            });
+                            legacyWorker.terminate();
+
+                            if (legacyResponse.success) {
+                                logAccuracyComparison(index + 1, legacyResponse.omrResults, omrResults);
+                            }
+                        } catch (compErr) {
+                            console.warn('[Accuracy Debugger] Comparison failed:', compErr);
+                        }
+                    }
 
                     // Identify which questions need to go to OCR
                     // Questions with clear or blank OMR status do not need OCR

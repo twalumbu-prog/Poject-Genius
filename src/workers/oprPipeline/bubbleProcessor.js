@@ -32,6 +32,7 @@ export function classifyStates(candidates) {
     // 1. Compute global "paper" baseline from empty-looking patches
     const baselineIntensities = candidates.map(c => c.stats.mean).sort((a, b) => a - b);
     const paperWhite = baselineIntensities[Math.floor(baselineIntensities.length * 0.75)]; // 75th percentile is paper
+    console.log(`[OPR Classification] Detected Paper Baseline: ${Math.round(paperWhite)}`);
 
     // 2. Compute dark/light deltas
     return candidates.map(c => {
