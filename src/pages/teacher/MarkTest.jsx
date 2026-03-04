@@ -647,7 +647,13 @@ export default function MarkTest() {
                                 ref={el => {
                                     setVideoRef(el);
                                     if (el && !el.srcObject) {
-                                        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+                                        navigator.mediaDevices.getUserMedia({
+                                            video: {
+                                                facingMode: 'environment',
+                                                width: { ideal: 4096 },
+                                                height: { ideal: 2160 }
+                                            }
+                                        })
                                             .then(stream => { el.srcObject = stream; el.play(); })
                                             .catch(err => console.error("Camera error:", err));
                                     }
@@ -657,6 +663,9 @@ export default function MarkTest() {
                             />
                             <div className="scanner-overlay">
                                 <div className="scanner-frame"></div>
+                                <div className="scanner-hint" style={{ position: 'absolute', top: '15%', left: '0', width: '100%', textAlign: 'center', color: 'rgba(255,255,255,0.8)', fontSize: '0.9rem', fontWeight: 500 }}>
+                                    Hold Steady (Auto-focusing...)
+                                </div>
                                 {isFlashActive && <div className="camera-flash" />}
                             </div>
                         </div>
@@ -678,8 +687,17 @@ export default function MarkTest() {
                                 <button
                                     className="btn btn-secondary"
                                     style={{ flex: 1, padding: '16px', fontSize: '1.1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-                                    onClick={async () => {
-                                        if (!videoRef || videoRef.videoWidth === 0) return;
+                                    onClick={async (e) => {
+                                        const btn = e.currentTarget;
+                                        btn.disabled = true;
+
+                                        // 300ms delay to allow physical stabilization and focus to settle
+                                        await new Promise(r => setTimeout(r, 300));
+
+                                        if (!videoRef || videoRef.videoWidth === 0) {
+                                            btn.disabled = false;
+                                            return;
+                                        }
 
                                         // Trigge Flash
                                         setIsFlashActive(true);
@@ -695,17 +713,33 @@ export default function MarkTest() {
                                         const cropX = (videoWidth - cropWidth) / 2;
                                         const cropY = (videoHeight - cropHeight) / 2;
 
-                                        canvas.width = cropWidth;
-                                        canvas.height = cropHeight;
+                                        // Immediately downscale intelligently to prevent payload/memory bloat on bulk capture
+                                        let targetWidth = cropWidth;
+                                        let targetHeight = cropHeight;
+                                        const MAX_CAPTURE_DIM = 1800;
+
+                                        if (Math.max(cropWidth, cropHeight) > MAX_CAPTURE_DIM) {
+                                            const scale = MAX_CAPTURE_DIM / Math.max(cropWidth, cropHeight);
+                                            targetWidth = Math.round(cropWidth * scale);
+                                            targetHeight = Math.round(cropHeight * scale);
+                                        }
+
+                                        canvas.width = targetWidth;
+                                        canvas.height = targetHeight;
 
                                         const ctx = canvas.getContext('2d');
-                                        // Draw only the cropped portion
-                                        ctx.drawImage(videoRef, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+                                        ctx.imageSmoothingEnabled = true;
+                                        ctx.imageSmoothingQuality = 'high';
 
-                                        const rawBase64 = canvas.toDataURL('image/jpeg', 0.9);
+                                        // Draw only the cropped portion, scaling it in the same pass
+                                        ctx.drawImage(videoRef, cropX, cropY, cropWidth, cropHeight, 0, 0, targetWidth, targetHeight);
+
+                                        // Aggressive JPEG compression for ~200-300kb sizes
+                                        const rawBase64 = canvas.toDataURL('image/jpeg', 0.8);
 
                                         // Push to state array
                                         setCapturedImages(prev => [...prev, rawBase64]);
+                                        btn.disabled = false;
                                     }}>
                                     <Camera size={24} />
                                     Scan
@@ -728,13 +762,15 @@ export default function MarkTest() {
                                                 setIsProcessing(true);
                                                 setProcessingStatus(`Enhancing ${capturedImages.length} image${capturedImages.length !== 1 ? 's' : ''}...`);
 
-                                                // Enhance each camera image and wrap in {base64, label}
-                                                const imageObjects = await Promise.all(
-                                                    capturedImages.map(async (img, idx) => {
-                                                        const enhanced = await applyDocScanFilter(img).catch(() => img);
-                                                        return { base64: enhanced, label: `Photo ${idx + 1}` };
-                                                    })
-                                                );
+                                                // Sequential Pipeline: Enhance each camera image one by one to prevent memory spikes in bulk marking
+                                                const imageObjects = [];
+                                                for (let idx = 0; idx < capturedImages.length; idx++) {
+                                                    const img = capturedImages[idx];
+                                                    setProcessingStatus(`Enhancing image ${idx + 1} of ${capturedImages.length}...`);
+                                                    await new Promise(r => setTimeout(r, 10)); // UI tick
+                                                    const enhanced = await applyDocScanFilter(img).catch(() => img);
+                                                    imageObjects.push({ base64: enhanced, label: `Photo ${idx + 1}` });
+                                                }
 
                                                 const allBase64 = imageObjects.map(io => io.base64);
                                                 setScanScriptCount(imageObjects.length);
@@ -985,10 +1021,20 @@ export default function MarkTest() {
                                         {reviewData.studentAnswers.map((ans, idx) => (
                                             <div key={idx} className={`review-item ${ans.confidence === 'Low' || !ans.student_answer ? 'review-warning' : ''}`}>
                                                 <div className="review-item-header">
-                                                    <span className="q-circle">Q{ans.question_number}</span>
-                                                    <span className={`status-badge ${ans.is_correct ? 'correct' : 'incorrect'}`}>
-                                                        {ans.is_correct ? 'Correct' : 'Incorrect'}
-                                                    </span>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                        <span className="q-circle">Q{ans.question_number}</span>
+                                                        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>Conf: {ans.confidence}</span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                        {(!ans.student_answer || ans.feedback?.toLowerCase().includes('not found')) && (
+                                                            <span style={{ fontSize: '0.7rem', fontWeight: 600, color: '#dc2626', background: '#fee2e2', padding: '3px 8px', borderRadius: '12px', border: '1px solid #fca5a5' }}>
+                                                                Not Found
+                                                            </span>
+                                                        )}
+                                                        <span className={`status-badge ${ans.is_correct ? 'correct' : 'incorrect'}`}>
+                                                            {ans.is_correct ? 'Correct' : 'Incorrect'}
+                                                        </span>
+                                                    </div>
                                                 </div>
                                                 <div className="review-item-body">
                                                     <div className="field-group">

@@ -10,11 +10,12 @@ import PdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 pdfjsLib.GlobalWorkerOptions.workerSrc = PdfjsWorker;
 
 const PDF_RENDER_SCALE = 1.8; // ~1620px wide for an A4 page — good for OCR
-const MAX_IMAGE_DIM = 1600; // Balanced for OCR accuracy vs payload size (helps prevent "load failed" on mobile)
+const MAX_IMAGE_DIM = 1800; // Increased to 1800px per user strategy (downscale to sweet spot)
 
 /**
- * Applies a robust contrast-boost filter designed for documents.
- * Uses a dynamic histogram-based stretch to ensure text is black and background is white.
+ * Applies Bradley's Adaptive Thresholding optimized with an Integral Image (Summed Area Table).
+ * This prevents UI freezing (O(1) local mean) and preserves faint text under uneven lighting perfectly.
+ * We blend the binary threshold map 60% with 40% of the original grayscale to retain physical paper context.
  * @param {string} base64Image
  * @returns {Promise<string>}
  */
@@ -35,83 +36,85 @@ export async function applyDocScanFilter(base64Image) {
             canvas.width = width;
             canvas.height = height;
             const ctx = canvas.getContext('2d');
+
+            // Smoother downscaling
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
             ctx.drawImage(img, 0, 0, width, height);
 
             const imageData = ctx.getImageData(0, 0, width, height);
             const d = imageData.data;
 
-            // 1. Calculate Histogram
-            const hist = new Uint32Array(256);
-            for (let i = 0; i < d.length; i += 4) {
-                const gray = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
-                hist[gray]++;
-            }
+            const w = width;
+            const h = height;
 
-            // 2. Find Black/White points (Percentile based)
-            let blackPoint = 0;
-            let whitePoint = 255;
-            const totalPixels = width * height;
+            // Typed arrays for high-performance memory reads/writes
+            const integral = new Uint32Array(w * h);
+            const grayData = new Uint8Array(w * h);
 
-            // Black point: darker 5% (to crush shadows/faint text to black)
-            let count = 0;
-            for (let i = 0; i < 256; i++) {
-                count += hist[i];
-                if (count > totalPixels * 0.05) {
-                    blackPoint = i;
-                    break;
+            // 1. Pass: Compute Grayscale and Integral Image (Summed Area Table)
+            for (let y = 0; y < h; y++) {
+                let rowSum = 0;
+                for (let x = 0; x < w; x++) {
+                    const i = y * w + x;
+                    const dataIdx = i * 4;
+
+                    // Standard luminance conversion
+                    const gray = Math.round(0.299 * d[dataIdx] + 0.587 * d[dataIdx + 1] + 0.114 * d[dataIdx + 2]);
+                    grayData[i] = gray;
+                    rowSum += gray;
+
+                    // I(x,y) = current_row_sum + I(x, y-1)
+                    integral[i] = rowSum + (y > 0 ? integral[(y - 1) * w + x] : 0);
                 }
             }
 
-            // White point: lighter 25% (very aggressive to push paper to white)
-            count = 0;
-            for (let i = 255; i >= 0; i--) {
-                count += hist[i];
-                if (count > totalPixels * 0.25) {
-                    whitePoint = i;
-                    break;
+            // 2. Pass: Local Mean Thresholding (Bradley)
+            // Window size S = width / 32 (scales with image size, ~50px for a 1600px image - ideal for handwriting)
+            const radius = Math.max(15, Math.floor(w / 32));
+            const T = 0.12; // 12% darker than the local average marks it as ink (prevents noise)
+
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const i = y * w + x;
+
+                    // Local window boundaries
+                    const x1 = Math.max(0, x - radius);
+                    const y1 = Math.max(0, y - radius);
+                    const x2 = Math.min(w - 1, x + radius);
+                    const y2 = Math.min(h - 1, y + radius);
+
+                    const count = (x2 - x1 + 1) * (y2 - y1 + 1);
+
+                    // O(1) Local Sum via Integral Image formula
+                    let sum = integral[y2 * w + x2];
+                    if (y1 > 0) sum -= integral[(y1 - 1) * w + x2];
+                    if (x1 > 0) sum -= integral[y2 * w + (x1 - 1)];
+                    if (x1 > 0 && y1 > 0) sum += integral[(y1 - 1) * w + (x1 - 1)];
+
+                    const mean = sum / count;
+                    const pixelGray = grayData[i];
+
+                    // Bradley decision
+                    let thresholded = 255; // default paper
+                    if (pixelGray < mean * (1 - T)) {
+                        thresholded = 0; // mark as ink
+                    }
+
+                    // Blend: 60% pure black/white structure + 40% original grayscale context
+                    const blended = Math.round((thresholded * 0.6) + (pixelGray * 0.4));
+
+                    const dataIdx = i * 4;
+                    d[dataIdx] = blended;
+                    d[dataIdx + 1] = blended;
+                    d[dataIdx + 2] = blended;
                 }
-            }
-
-            // Ensure points aren't too close to prevent extreme noise amplification
-            if (whitePoint - blackPoint < 60) {
-                blackPoint = Math.max(0, blackPoint - 30);
-                whitePoint = Math.min(255, whitePoint + 30);
-            }
-
-            // 3. Apply Contrast Stretch + Gamma Adjustment
-            const range = Math.max(1, whitePoint - blackPoint);
-            let whitePixelCount = 0;
-
-            for (let i = 0; i < d.length; i += 4) {
-                let gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-
-                // Stretch: (val - black) / range * 255
-                gray = ((gray - blackPoint) / range) * 255;
-
-                // Push to extremes more aggressively
-                if (gray > 210) gray = 255;
-                else if (gray < 80) gray = 0;
-                else {
-                    // Smooth s-curve in middle
-                    const normalized = gray / 255;
-                    gray = (Math.pow(normalized, 1.2) * 255); // Gentler curve
-                }
-
-                const final = Math.min(255, Math.max(0, Math.round(gray)));
-                if (final >= 250) whitePixelCount++;
-
-                d[i] = d[i + 1] = d[i + 2] = final;
-            }
-
-            // Safety check: if image became > 99% white, fallback to raw
-            if (whitePixelCount > totalPixels * 0.995) {
-                console.warn('Filter too aggressive, falling back to raw image.');
-                resolve(base64Image);
-                return;
             }
 
             ctx.putImageData(imageData, 0, 0);
-            resolve(canvas.toDataURL('image/jpeg', 0.75));
+
+            // Export aggressively compressed JPEG (0.75-0.8) to hit our ~300KB payload target
+            resolve(canvas.toDataURL('image/jpeg', 0.8));
         };
         img.onerror = () => resolve(base64Image);
         img.src = base64Image;
