@@ -29,6 +29,8 @@ export default function MarkTest() {
     const [scannedImage, setScannedImage] = useState(null);
     const [warpedImage, setWarpedImage] = useState(null); // Vision pipeline output
 
+    const reviewData = reviewBatch ? reviewBatch[currentReviewIndex] : null;
+
     useEffect(() => {
         if (reviewData?._debugMeta?.warped_blob) {
             setWarpedImage(reviewData._debugMeta.warped_blob);
@@ -130,7 +132,6 @@ export default function MarkTest() {
         return new Blob([ab], { type: mimeString });
     };
 
-    const reviewData = reviewBatch ? reviewBatch[currentReviewIndex] : null;
 
     useEffect(() => {
         fetchTestData();
