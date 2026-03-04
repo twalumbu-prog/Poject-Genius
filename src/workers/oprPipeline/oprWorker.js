@@ -6,6 +6,8 @@ import { classifyStates } from './bubbleProcessor.js';
 import { decideRows } from './decisionEngine.js';
 import { validateSheet } from './decisionEngine.js';
 
+console.log('[OPR Worker] Source loaded and initialized');
+
 self.onerror = (err) => {
     console.error('[OPR Worker Global Error]', err);
     self.postMessage({ success: false, error: `GLOBAL_WORKER_ERROR: ${err.message}` });

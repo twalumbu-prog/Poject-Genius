@@ -288,11 +288,9 @@ export default function MarkTest() {
                     // --- STAGE A & B: DETERMINISTIC OMR ENGINE ---
                     setProcessingStatus(`[${engine === 'opr' ? 'OPR' : 'OMR'}] Analysing layout and bubbles for script ${index + 1}...`);
 
-                    const workerPath = engine === 'opr'
-                        ? '../../workers/oprPipeline/oprWorker.js'
-                        : '../../workers/omrWorker.js';
-
-                    const omrWorker = new Worker(new URL(workerPath, import.meta.url), { type: 'module' });
+                    const omrWorker = engine === 'opr'
+                        ? new Worker(new URL('../../workers/oprPipeline/oprWorker.js', import.meta.url), { type: 'module' })
+                        : new Worker(new URL('../../workers/omrWorker.js', import.meta.url), { type: 'module' });
 
                     const omrPromise = new Promise((res, rej) => {
                         omrWorker.onmessage = (e) => res(e.data);
