@@ -149,7 +149,7 @@ Deno.serve(async (req: Request) => {
       const cog = difficulty === "Basic" ? "recall & understanding" : difficulty === "Advanced" ? "analysis & evaluation" : "application & interpretation";
       messages = [
         { role: "system", content: `Expert curriculum designer for Zambian Ministry of Education. Generate strictly valid JSON.\nSchema: {"questions":[{"question_text":"string","type":"multiple_choice","options":["A","B","C","D"],"correct_answer":"A","marks":1,"topic":"string","cognitive_level":"string","difficulty_score":5,"explanation":"string"}]}` },
-        { role: "user", content: `Generate ${total} ${difficulty} ${subject} questions for ${grade}. Topics: ${topicList}.${existingQuestions?.length > 0 ? ` Avoid: ${existingQuestions.join(", ")}` : ""}` },
+        { role: "user", content: "Generate " + total + " " + difficulty + " " + subject + " questions for " + grade + ". Topics: " + topicList + "." + (existingQuestions?.length > 0 ? " Avoid: " + existingQuestions.join(", ") : "") },
       ];
     } else if (mode === "generate_key") {
       if (!image) throw new Error("image required");
@@ -167,76 +167,67 @@ Deno.serve(async (req: Request) => {
       messages = [
         {
           role: "system",
-          content: `You are an expert examiner grading a student's handwritten test script.
-Respond with STRICTLY VALID JSON only — no markdown, no commentary.
-
-CRITICAL RULES:
-1. The marking scheme contains EXACTLY ${questionCount} questions.
-2. You MUST return EXACTLY ${questionCount} objects in the answers array.
-3. NEVER return fewer items.
-4. NEVER stop early.
-5. NEVER omit a question.
-6. The \`question_number\` MUST be an integer exactly matching the scheme. Do NOT output strings like "1", output 1.
-7. If an answer is missing, unclear, or illegible, you MUST still return the object and set:
-   * student_answer: "Unanswered"
-   * is_correct: false
-   * confidence: "Low"
-   * feedback: "Missing from page or illegible"
-
-══ ANSWER TYPE DETECTION ══
-For each question, first determine HOW the student answered, then extract accordingly:
-
-1. LETTER MCQ — Student wrote a letter (A/B/C/D) next to a question number.
-   → Extract the letter as-is. Accept both capital and lowercase.
-
-2. SHADED / FILLED BUBBLE — Student filled or shaded a circle from a row of options (A B C D).
-   → Identify the darkest, most completely filled circle as the answer.
-   → If two circles appear equally filled, pick the one more completely shaded.
-   → Report as the corresponding letter (A, B, C, or D).
-
-3. SHORT WRITTEN ANSWER / PHRASE — Student wrote a word, phrase, or sentence.
-   → Extract the exact text the student wrote.
-   → Compare SEMANTICALLY against the correct answer in the marking scheme.
-   → Mark correct if the meaning is equivalent, even if worded differently.
-   → Ignore capitalisation and minor spelling errors.
-
-4. NUMERIC ANSWER — Student wrote a number.
-   → Extract the number. Accept equivalent forms (e.g. 0.5 = 1/2 = 50%).
-   → Mark correct if within reasonable rounding for the context.
-
-══ GENERAL RULES ══
-- STUDENT NAME IDENTIFICATION (CRITICAL):
-  → First, scan the top 20% of the image for ANY labels like "Name:", "Pupil:", "Student:", "Names:", "Surname:", or "First Name:".
-  → Extract the handwritten text found in the immediate vicinity (usually to the right or below these labels).
-  → Even if the handwriting is messy, DO NOT use "Unknown" if there is clearly readable text in the name field.
-  → If there is a box for the name, extract the contents of that box.
-  → Cross-reference with any other identifiers found (like Student ID or Grade) to confirm header context.
-- Extract student ID/Number if present (often near the name or in its own box).
-- If handwriting is crossed out, evaluate ONLY the final uncrossed answer.
-- If an answer is completely illegible: is_correct=false, confidence="Low", feedback="Illegible handwriting".
-- If a question is left blank: student_answer="Unanswered", is_correct=false.
-- Be generous with confidence="High" only when the answer is unambiguously clear.
-- Provide SEMANTIC marking for written phrases (if the meaning matches the scheme, it's correct).
-
-══ MARKING SCHEME ══
-${schemeText}
-
-══ RESPONSE SCHEMA ══
-{
-  "results": [{
-    "studentName": "string",
-    "student_id": "string",
-    "grade": "string",
-    "answers": [{
-      "question_number": 1,
-      "answer_type": "letter_mcq|shaded_bubble|short_written|numeric",
-      "student_answer": "string",
-      "is_correct": true,
-      "feedback": "string (empty if correct, explanation if wrong)",
-      "confidence": "High|Medium|Low"
-    }]
-  }]
-}`
+          content: "You are an expert examiner grading a student's handwritten test script.\n" +
+            "Respond with STRICTLY VALID JSON only — no markdown, no commentary.\n\n" +
+            "CRITICAL RULES:\n" +
+            "1. The marking scheme contains EXACTLY " + questionCount + " questions.\n" +
+            "2. You MUST return EXACTLY " + questionCount + " objects in the answers array.\n" +
+            "3. NEVER return fewer items.\n" +
+            "4. NEVER stop early.\n" +
+            "5. NEVER omit a question.\n" +
+            "6. The `question_number` MUST be an integer exactly matching the scheme. Do NOT output strings like \"1\", output 1.\n" +
+            "7. If an answer is missing, unclear, or illegible, you MUST still return the object and set:\n" +
+            "   * student_answer: \"Unanswered\"\n" +
+            "   * is_correct: false\n" +
+            "   * confidence: \"Low\"\n" +
+            "   * feedback: \"Missing from page or illegible\"\n\n" +
+            "══ ANSWER TYPE DETECTION ══\n" +
+            "For each question, first determine HOW the student answered, then extract accordingly:\n\n" +
+            "1. LETTER MCQ — Student wrote a letter (A/B/C/D) next to a question number.\n" +
+            "   → Extract the letter as-is. Accept both capital and lowercase.\n\n" +
+            "2. SHADED / FILLED BUBBLE — Student filled or shaded a circle from a row of options (A B C D).\n" +
+            "   → Identify the darkest, most completely filled circle as the answer.\n" +
+            "   → If two circles appear equally filled, pick the one more completely shaded.\n" +
+            "   → Report as the corresponding letter (A, B, C, or D).\n\n" +
+            "3. SHORT WRITTEN ANSWER / PHRASE — Student wrote a word, phrase, or sentence.\n" +
+            "   → Extract the exact text the student wrote.\n" +
+            "   → Compare SEMANTICALLY against the correct answer in the marking scheme.\n" +
+            "   → Mark correct if the meaning is equivalent, even if worded differently.\n" +
+            "   → Ignore capitalisation and minor spelling errors.\n\n" +
+            "4. NUMERIC ANSWER — Student wrote a number.\n" +
+            "   → Extract the number. Accept equivalent forms (e.g. 0.5 = 1/2 = 50%).\n" +
+            "   → Mark correct if within reasonable rounding for the context.\n\n" +
+            "══ GENERAL RULES ══\n" +
+            "- STUDENT NAME IDENTIFICATION (CRITICAL):\n" +
+            "  → First, scan the top 20% of the image for ANY labels like \"Name:\", \"Pupil:\", \"Student:\", \"Names:\", \"Surname:\", or \"First Name:\".\n" +
+            "  → Extract the handwritten text found in the immediate vicinity (usually to the right or below these labels).\n" +
+            "  → Even if the handwriting is messy, DO NOT use \"Unknown\" if there is clearly readable text in the name field.\n" +
+            "  → If there is a box for the name, extract the contents of that box.\n" +
+            "  → Cross-reference with any other identifiers found (like Student ID or Grade) to confirm header context.\n" +
+            "- Extract student ID/Number if present (often near the name or in its own box).\n" +
+            "- If handwriting is crossed out, evaluate ONLY the final uncrossed answer.\n" +
+            "- If an answer is completely illegible: is_correct=false, confidence=\"Low\", feedback=\"Illegible handwriting\".\n" +
+            "- If a question is left blank: student_answer=\"Unanswered\", is_correct=false.\n" +
+            "- Be generous with confidence=\"High\" only when the answer is unambiguously clear.\n" +
+            "- Provide SEMANTIC marking for written phrases (if the meaning matches the scheme, it's correct).\n\n" +
+            "══ MARKING SCHEME ══\n" +
+            schemeText + "\n\n" +
+            "══ RESPONSE SCHEMA ══\n" +
+            "{\n" +
+            "  \"results\": [{\n" +
+            "    \"studentName\": \"string\",\n" +
+            "    \"student_id\": \"string\",\n" +
+            "    \"grade\": \"string\",\n" +
+            "    \"answers\": [{\n" +
+            "      \"question_number\": 1,\n" +
+            "      \"answer_type\": \"letter_mcq|shaded_bubble|short_written|numeric\",\n" +
+            "      \"student_answer\": \"string\",\n" +
+            "      \"is_correct\": true,\n" +
+            "      \"feedback\": \"string (empty if correct, explanation if wrong)\",\n" +
+            "      \"confidence\": \"High|Medium|Low\"\n" +
+            "    }]\n" +
+            "  }]\n" +
+            "}"
         },
         {
           role: "user",
@@ -250,7 +241,7 @@ ${schemeText}
       if (!testParams?.questions) throw new Error("testParams.questions required");
       messages = [
         { role: "system", content: `Expert examiner. Respond with strictly valid JSON.\nSchema: {"questions":[{"question_number":1,"question_text":"string","options":["A","B","C","D"],"correct_answer":"A","explanation":"string"}]}` },
-        { role: "user", content: `Solve:\n${JSON.stringify(testParams.questions, null, 2)}` },
+        { role: "user", content: "Solve:\n" + JSON.stringify(testParams.questions, null, 2) },
       ];
     } else {
       throw new Error("Invalid mode: " + mode);
