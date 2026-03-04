@@ -11,7 +11,9 @@ export default function Assessments() {
     const navigate = useNavigate();
     const [testStreams, setTestStreams] = useState([]);
     const [standaloneTests, setStandaloneTests] = useState([]);
+    const [readingPassages, setReadingPassages] = useState([]);
     const [loading, setLoading] = useState(true);
+
     const [showCreateMenu, setShowCreateMenu] = useState(false);
 
     useEffect(() => {
@@ -45,8 +47,19 @@ export default function Assessments() {
 
             if (standaloneError) throw standaloneError;
 
+            // Fetch reading passages
+            const { data: passages, error: passagesError } = await supabase
+                .from('reading_passages')
+                .select('*')
+                .eq('teacher_id', user.id)
+                .order('created_at', { ascending: false });
+
+            if (passagesError) throw passagesError;
+
             setTestStreams(streams || []);
             setStandaloneTests(standalone || []);
+            setReadingPassages(passages || []);
+
         } catch (error) {
             console.error('Error fetching assessments:', error);
         } finally {
@@ -65,7 +78,13 @@ export default function Assessments() {
         alert('Standalone test creation coming soon!');
     };
 
-    const hasAssessments = testStreams.length > 0 || standaloneTests.length > 0;
+    const handleCreateReading = () => {
+        setShowCreateMenu(false);
+        navigate('/teacher/reading/create');
+    };
+
+    const hasAssessments = testStreams.length > 0 || standaloneTests.length > 0 || readingPassages.length > 0;
+
 
     if (loading) {
         return (
@@ -115,7 +134,11 @@ export default function Assessments() {
                         {standaloneTests.map((test) => (
                             <AssessmentCard key={test.id} test={test} onAction={fetchAssessments} />
                         ))}
+                        {readingPassages.map((passage) => (
+                            <AssessmentCard key={passage.id} passage={passage} onAction={fetchAssessments} />
+                        ))}
                     </div>
+
 
                     {/* Floating Action Button */}
                     <div className="fab-container">
@@ -136,11 +159,16 @@ export default function Assessments() {
                                     <Sparkles size={18} />
                                     Generate with AI
                                 </button>
+                                <button className="fab-menu-item" onClick={handleCreateReading}>
+                                    <Sparkles size={18} />
+                                    Create Reading Test
+                                </button>
                                 <button className="fab-menu-item" onClick={handleCreateTest}>
                                     <Plus size={18} />
                                     Create Single Test
                                 </button>
                             </div>
+
                         )}
                     </div>
                 </>

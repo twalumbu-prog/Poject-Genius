@@ -21,6 +21,10 @@ import MarkingSchemeReview from './pages/teacher/MarkingSchemeReview';
 import StudentProfile from './pages/teacher/StudentProfile';
 import ReportCardView from './pages/teacher/ReportCardView';
 import ArchivedAssessments from './pages/teacher/ArchivedAssessments';
+import CreateReadingPassage from './pages/teacher/CreateReadingPassage';
+import ReadingSession from './pages/teacher/ReadingSession';
+import ReadingResults from './pages/teacher/ReadingResults';
+
 
 // Admin pages
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -151,6 +155,33 @@ function App() {
             </ProtectedRoute>
           }
         />
+
+        {/* Reading Fluency routes */}
+        <Route
+          path="/teacher/reading/create"
+          element={
+            <ProtectedRoute requiredRole="teacher">
+              <CreateReadingPassage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/teacher/reading/session/:passageId"
+          element={
+            <ProtectedRoute requiredRole="teacher">
+              <ReadingSession />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/teacher/reading/results/:sessionId"
+          element={
+            <ProtectedRoute requiredRole="teacher">
+              <ReadingResults />
+            </ProtectedRoute>
+          }
+        />
+
 
         {/* Admin routes */}
         <Route

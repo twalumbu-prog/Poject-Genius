@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronUp, CheckCircle, Circle, AlertCircle, Calendar, Archive, Trash2, RotateCcw, MoreVertical } from 'lucide-react';
+import { ChevronDown, ChevronUp, CheckCircle, Circle, AlertCircle, Calendar, Archive, Trash2, RotateCcw, MoreVertical, Sparkles } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import './AssessmentCard.css';
 
-export default function AssessmentCard({ stream, test, onAction, isArchivedView }) {
+export default function AssessmentCard({ stream, test, passage, onAction, isArchivedView }) {
     const [isExpanded, setIsExpanded] = useState(false);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const navigate = useNavigate();
@@ -122,7 +122,46 @@ export default function AssessmentCard({ stream, test, onAction, isArchivedView 
         );
     }
 
+    // If this is a reading passage
+    if (passage) {
+        return (
+            <div
+                className={`assessment-card passage-card ${isArchivedView ? 'archived' : ''}`}
+                onClick={() => !isArchivedView && navigate(`/teacher/reading/session/${passage.id}`)}
+            >
+                <div className="card-header">
+                    <div className="card-title">
+                        <div className="title-row">
+                            <div className="type-icon reading-type">
+                                <Sparkles size={14} />
+                                <span>Reading AI</span>
+                            </div>
+                            <div className="creation-date">
+                                <Calendar size={12} />
+                                <span>{formatDate(passage.created_at)}</span>
+                            </div>
+                        </div>
+                        <h3>{passage.title}</h3>
+                        <p className="card-subtitle">{passage.grade} • {passage.word_count} words</p>
+                    </div>
+                    <div className="card-right">
+                        <button
+                            className="btn btn-primary btn-sm"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/teacher/reading/session/${passage.id}`);
+                            }}
+                        >
+                            Start Reading Test
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     // If this is a test stream
+
     const totalTests = stream.tests?.length || 0;
     const completedTests = stream.tests?.filter(t => t.status === 'completed').length || 0;
     const progress = totalTests > 0 ? (completedTests / totalTests) * 100 : 0;
