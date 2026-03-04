@@ -23,6 +23,7 @@ export default function MarkTest() {
 
     const [scannedImage, setScannedImage] = useState(null);
     const [isCameraOpen, setIsCameraOpen] = useState(false);
+    const [isFlashActive, setIsFlashActive] = useState(false);
     const [showAnswers, setShowAnswers] = useState(false);
     const [videoRef, setVideoRef] = useState(null);
     const [showLightbox, setShowLightbox] = useState(false);
@@ -652,6 +653,7 @@ export default function MarkTest() {
                             />
                             <div className="scanner-overlay">
                                 <div className="scanner-frame"></div>
+                                {isFlashActive && <div className="camera-flash" />}
                             </div>
                         </div>
                         <div className="camera-footer" style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '16px', width: '100%', background: 'var(--bg-card)', zIndex: 10, position: 'absolute', bottom: 0, left: 0 }}>
@@ -659,9 +661,9 @@ export default function MarkTest() {
                             {capturedImages.length > 0 && (
                                 <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '4px' }}>
                                     {capturedImages.map((img, i) => (
-                                        <div key={i} style={{ position: 'relative', width: '60px', height: '80px', flexShrink: 0 }}>
-                                            <img src={img} alt={`Capture ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '4px', border: '2px solid var(--color-accent-primary)' }} />
-                                            <div style={{ position: 'absolute', top: '-6px', right: '-6px', background: 'var(--color-accent-primary)', color: 'white', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold' }}>{i + 1}</div>
+                                        <div key={i} className="thumb-item captured">
+                                            <img src={img} alt={`Capture ${i + 1}`} />
+                                            <div className="thumb-count">{i + 1}</div>
                                         </div>
                                     ))}
                                 </div>
@@ -673,7 +675,11 @@ export default function MarkTest() {
                                     className="btn btn-secondary"
                                     style={{ flex: 1, padding: '16px', fontSize: '1.1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
                                     onClick={async () => {
-                                        if (!videoRef) return;
+                                        if (!videoRef || videoRef.videoWidth === 0) return;
+
+                                        // Trigge Flash
+                                        setIsFlashActive(true);
+                                        setTimeout(() => setIsFlashActive(false), 400);
 
                                         const canvas = document.createElement('canvas');
                                         const videoWidth = videoRef.videoWidth;
@@ -694,7 +700,7 @@ export default function MarkTest() {
 
                                         const rawBase64 = canvas.toDataURL('image/jpeg', 0.9);
 
-                                        // Push to state array instead of processing immediately
+                                        // Push to state array
                                         setCapturedImages(prev => [...prev, rawBase64]);
                                     }}>
                                     <Camera size={24} />

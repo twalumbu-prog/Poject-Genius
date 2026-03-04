@@ -12,17 +12,19 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = PdfjsWorker;
 const PDF_RENDER_SCALE = 1.8; // ~1620px wide for an A4 page — good for OCR
 const MAX_IMAGE_DIM = 1600; // cap for camera/upload images to stay under 546 OOM limit
 
-// ── applyDocScanFilter ────────────────────────────────────────────────────────
 /**
- * Applies a CamScanner-style high-contrast grayscale filter to a single image.
- * Downscales to MAX_IMAGE_DIM on the longest side before processing.
- * @param {string} base64Image  data:image/... base64 string
- * @returns {Promise<string>}   filtered JPEG base64 string
+ * Applies a robust contrast-boost filter designed for documents.
+ * Unlike hard binary thresholding, this preserves nuance while making text pop.
+ * Includes a "panic" check: if the result is solid white (common in overexposed photos),
+ * it returns the original image instead.
+ *
+ * @param {string} base64Image
+ * @returns {Promise<string>}
  */
 export async function applyDocScanFilter(base64Image) {
     if (!base64Image.startsWith('data:image/')) return base64Image;
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
             let { width, height } = img;
@@ -41,31 +43,52 @@ export async function applyDocScanFilter(base64Image) {
             const imageData = ctx.getImageData(0, 0, width, height);
             const d = imageData.data;
 
+            let whiteCount = 0;
+            const totalPixels = width * height;
+
             for (let i = 0; i < d.length; i += 4) {
+                // Standard grayscale luminosity
                 let gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-                if (gray > 160) gray = 255;
-                else if (gray < 80) gray = 0;
-                else gray = ((gray - 80) / 80) * 255 > 128 ? 255 : 0;
+
+                // Robust contrast boost (Softer than previous binary threshold)
+                // Maps 50-200 range to 0-255 roughly, with smoothing
+                if (gray > 185) {
+                    gray = 255;
+                } else if (gray < 75) {
+                    gray = 0;
+                } else {
+                    // Linear stretch: (val - min) * (newMax / (max - min))
+                    gray = Math.round((gray - 75) * (255 / 110));
+                }
+
+                if (gray >= 250) whiteCount++;
+
                 d[i] = d[i + 1] = d[i + 2] = gray;
             }
 
+            // SAFETY CHECK: If > 99% of the image is pure white, the filter failed
+            // (likely the original was already quite bright). Return original.
+            if (whiteCount > totalPixels * 0.99) {
+                console.warn('Doc scan filter resulted in blank image. Falling back to raw capture.');
+                resolve(base64Image);
+                return;
+            }
+
             ctx.putImageData(imageData, 0, 0);
-            resolve(canvas.toDataURL('image/jpeg', 0.82));
+            resolve(canvas.toDataURL('image/jpeg', 0.85));
         };
-        img.onerror = reject;
+        img.onerror = () => resolve(base64Image); // Fallback on error
         img.src = base64Image;
     });
 }
 
 // ── pdfToImages ───────────────────────────────────────────────────────────────
 /**
- * Converts every page of a PDF (given as a base64 data-URL or ArrayBuffer)
- * into a JPEG base64 string. Returns one entry per page.
- * @param {string} base64Pdf  data:application/pdf;base64,... string
- * @returns {Promise<string[]>}  array of JPEG base64 strings, one per page
+ * Converts every page of a PDF into a high-contrast JPEG.
+ * @param {string} base64Pdf
+ * @returns {Promise<string[]>}
  */
 export async function pdfToImages(base64Pdf) {
-    // Strip the data-URL header to get raw base64, then decode to binary
     const base64Data = base64Pdf.split(',')[1];
     const binaryStr = atob(base64Data);
     const bytes = new Uint8Array(binaryStr.length);
@@ -85,19 +108,21 @@ export async function pdfToImages(base64Pdf) {
 
         await page.render({ canvasContext: ctx, viewport }).promise;
 
-        // Apply the same contrast filter so handwriting pops
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const d = imageData.data;
+
         for (let i = 0; i < d.length; i += 4) {
             let gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-            if (gray > 170) gray = 255;
-            else if (gray < 90) gray = 0;
-            else gray = ((gray - 90) / 80) * 255 > 128 ? 255 : 0;
+            // PDF backgrounds are usually pure white, so we use a gentler curve
+            if (gray > 200) gray = 255;
+            else if (gray < 60) gray = 0;
+            else gray = Math.round((gray - 60) * (255 / 140));
+
             d[i] = d[i + 1] = d[i + 2] = gray;
         }
         ctx.putImageData(imageData, 0, 0);
 
-        pageImages.push(canvas.toDataURL('image/jpeg', 0.85));
+        pageImages.push(canvas.toDataURL('image/jpeg', 0.88));
     }
 
     return pageImages;
