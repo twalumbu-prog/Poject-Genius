@@ -1,11 +1,36 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.1";
+
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+
+const GEMINI_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.0-flash-exp",
+  "gemini-1.5-pro",
+];
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+/**
+ * Normalizes question number representations from AI to extract the first integer.
+ * Handles "1", " 1 ", "Q1", "01", "4a" -> always returns an integer.
+ * @param value The raw string/number from AI
+ * @returns {number|null} The cleanly parsed integer or null
+ */
+function normalizeQuestionNumber(value: number | string | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return Math.floor(value);
+  const str = String(value).trim();
+  const match = str.match(/\d+/);
+  if (match) return parseInt(match[0], 10);
+  return null;
+}
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -16,47 +41,52 @@ function jsonResponse(body: unknown, status = 200) {
 
 function cleanRepairAndParseJson(text: string) {
   let cleaned = text.replace(/^```json\s*/, "").replace(/^```\s*/, "").replace(/\s*```$/, "").trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch (e) {
-    if (cleaned.length > 100) {
-      const rescueAttempts = [cleaned + '"]}]}', cleaned + '"}]}', cleaned + '}]}', cleaned + ']}', cleaned + '}'];
-      for (const attempt of rescueAttempts) {
-        try { return JSON.parse(attempt); } catch (_) { }
-      }
-      let lastGood = cleaned.lastIndexOf('},');
-      if (lastGood === -1) lastGood = cleaned.lastIndexOf('}');
-      if (lastGood > -1) {
-        const t = cleaned.substring(0, lastGood + 1);
-        for (const r of [t + ']}', t + ']} ]}', t + '}']) {
-          try { return JSON.parse(r); } catch (_) { }
-        }
-      }
+  const firstBrace = cleaned.indexOf("{");
+  const lastBrace = cleaned.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && firstBrace < lastBrace) {
+    cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+  }
+  try { return JSON.parse(cleaned); }
+  catch (e) {
+    console.error("Parse failed. Repairing trailing commas. Raw:", cleaned.substring(0, 200) + "...");
+    cleaned = cleaned.replace(/,\s*([\]}])/g, "$1");
+    try { return JSON.parse(cleaned); }
+    catch (e2) {
+      console.error("Repair failed. Raw:", cleaned);
+      throw new Error("AI returned invalid JSON: " + (e2 as Error).message);
     }
-    throw e;
   }
 }
 
-const GEMINI_MODELS = [
-  "gemini-2.5-pro",
-  "gemini-2.5-flash",
-];
-
 async function callGemini(messages: any[], apiKey: string) {
-  const systemMessage = messages.find((m: any) => m.role === "system")?.content || "";
-  const userMessage = messages.find((m: any) => m.role === "user");
-
-  const parts: any[] = [];
-  if (typeof userMessage.content === "string") {
-    parts.push({ text: userMessage.content });
-  } else {
-    for (const part of userMessage.content) {
-      if (part.type === "text") parts.push({ text: part.text });
-      else if (part.type === "image_url") {
-        const url = part.image_url.url || part.image_url;
-        const match = url.match(/^data:([^;]+);base64,(.+)$/);
-        if (match) parts.push({ inline_data: { mime_type: match[1], data: match[2] } });
+  const parts = messages.filter(m => m.role === "user").flatMap((msg: any) => {
+    if (typeof msg.content === "string") return [{ text: msg.content }];
+    return msg.content.map((p: any) => {
+      if (p.type === "text") return { text: p.text };
+      if (p.type === "image_url") {
+        const url = p.image_url.url || p.image_url;
+        const match = url.match(/^data:(.+?);base64,(.+)$/);
+        if (match) return { inline_data: { mime_type: match[1], data: match[2] } };
+        throw new Error("Invalid image_url format");
       }
+      return p;
+    });
+  });
+
+  const systemMessage = messages.find(m => m.role === "system")?.content || "";
+
+  // Check total base64 payload size
+  let totalBytes = 0;
+  for (const part of parts) {
+    if (part.inline_data) {
+      totalBytes += (part.inline_data.data.length * 0.75); // base64 to byte approximation
+    }
+  }
+
+  if (totalBytes > 0) {
+    console.log(`[Gemini] Payload contains ~${Math.round(totalBytes / 1024)}KB of image data`);
+    if (totalBytes > 4.5 * 1024 * 1024) {
+      console.warn(`[Gemini] WARNING: Base64 payload is very large (>4.5MB). Vercel edge may timeout or 413, Supabase may reject.`);
     }
   }
 
@@ -97,7 +127,7 @@ async function callClaude(messages: any[], apiKey: string) {
         if (p.type === "text") return { type: "text", text: p.text };
         if (p.type === "image_url") {
           const url = p.image_url.url || p.image_url;
-          const match = url.match(/^data:(.+);base64,(.+)$/);
+          const match = url.match(/^data:(.+?);base64,(.+)$/);
           if (match) return { type: "image", source: { type: "base64", media_type: match[1], data: match[2] } };
         }
         return p;
@@ -144,12 +174,21 @@ Deno.serve(async (req: Request) => {
       if (!testParams) throw new Error("testParams is required");
       const { subject, grade, topics, difficulty, existingQuestions } = testParams;
       let topicList = "", total = 0;
-      if (Array.isArray(topics)) { topicList = topics.map((t: any) => `${t.name}(${t.count})`).join(", "); total = topics.reduce((s: number, t: any) => s + (parseInt(t.count) || 0), 0); }
-      else { topicList = testParams.topic; total = testParams.numQuestions; }
+      if (Array.isArray(topics)) {
+        topicList = topics.map((t: any) => `${t.name}(${t.count})`).join(", ");
+        total = topics.reduce((s: number, t: any) => s + (parseInt(t.count) || 0), 0);
+      }
+      else {
+        topicList = testParams.topic;
+        total = testParams.numQuestions;
+      }
       const cog = difficulty === "Basic" ? "recall & understanding" : difficulty === "Advanced" ? "analysis & evaluation" : "application & interpretation";
       messages = [
-        { role: "system", content: `Expert curriculum designer for Zambian Ministry of Education. Generate strictly valid JSON.\nSchema: {"questions":[{"question_text":"string","type":"multiple_choice","options":["A","B","C","D"],"correct_answer":"A","marks":1,"topic":"string","cognitive_level":"string","difficulty_score":5,"explanation":"string"}]}` },
-        { role: "user", content: "Generate " + total + " " + difficulty + " " + subject + " questions for " + grade + ". Topics: " + topicList + "." + (existingQuestions?.length > 0 ? " Avoid: " + existingQuestions.join(", ") : "") },
+        {
+          role: "system", content: `Expert curriculum designer for Zambian Ministry of Education. Generate strictly valid JSON.
+CRITICAL INSTRUCTION: You MUST generate EXACTLY ${total} questions. Do not stop early. Do not skip any.
+Schema: {"questions":[{"question_text":"string","type":"multiple_choice","options":["A","B","C","D"],"correct_answer":"A","marks":1,"topic":"string","subtopic":"string","learning_outcome":"string","cognitive_level":"string","difficulty_score":5,"explanation":"string"}]}` },
+        { role: "user", content: "Generate EXACTLY " + total + " " + difficulty + " " + subject + " questions for " + grade + ". Topics: " + topicList + ". Identify specific subtopic and learning_outcome for each." + (existingQuestions?.length > 0 ? " Avoid: " + existingQuestions.join(", ") : "") },
       ];
     } else if (mode === "generate_key") {
       if (!image) throw new Error("image required");
@@ -248,6 +287,82 @@ Deno.serve(async (req: Request) => {
     }
 
     const { result, provider } = await callAI(messages, { gemini: geminiKey });
+
+    // ------------------------------------------------------------------
+    // EXPERIMENTAL HARD VALIDATION AND REPAIR (V51+)
+    // Only runs for mark_script since that's where missing questions break the UI
+    // ------------------------------------------------------------------
+    if (mode === "mark_script" && markingScheme) {
+      console.log(`[Validation V51] Post-processing edge AI results for ${result?.results?.[0]?.studentName || "Unknown"}`);
+
+      const expectedQuestionCount = markingScheme.length;
+      let aiAnswers = result?.results?.[0]?.answers || [];
+      const rawCount = aiAnswers.length;
+
+      // 1. DEDUPLICATION (Keep first occurrence)
+      const uniqueAnswers = [];
+      const seenQNums = new Set();
+      let duplicateCount = 0;
+
+      for (const ans of aiAnswers) {
+        const qNum = normalizeQuestionNumber(ans.question_number);
+        if (qNum !== null && !seenQNums.has(qNum)) {
+          seenQNums.add(qNum);
+          ans.question_number = qNum; // enforce clean integer
+          uniqueAnswers.push(ans);
+        } else if (qNum !== null) {
+          console.warn(`[Validation V51] Discarding duplicate answer for Q${qNum}`);
+          duplicateCount++;
+        }
+      }
+
+      // 2. BUILD O(1) MAP OF AI ANSWERS
+      const answerMap = new Map();
+      uniqueAnswers.forEach(ans => answerMap.set(ans.question_number, ans));
+
+      // 3. HARD REPAIR: Enforce exactly the expected scheme questions
+      const repairedAnswers = [];
+      let missingCount = 0;
+
+      for (const schemeQ of markingScheme) {
+        const qNum = normalizeQuestionNumber(schemeQ.question_number);
+        if (qNum === null) continue; // Invalid scheme question
+
+        if (answerMap.has(qNum)) {
+          repairedAnswers.push(answerMap.get(qNum));
+        } else {
+          // AI missed this question completely — synthesize a blank "Unanswered" response
+          console.warn(`[Validation V51] AI missed Q${qNum} entirely. Auto-repairing with 'Unanswered'.`);
+          missingCount++;
+          repairedAnswers.push({
+            question_number: qNum,
+            answer_type: "unknown",
+            student_answer: "Unanswered",
+            is_correct: false,
+            confidence: "Low",
+            feedback: "Question omitted by AI engine during extraction.",
+            _repaired: true // flag for the frontend to know
+          });
+        }
+      }
+
+      // Update the payload
+      if (!result.results) result.results = [{}];
+      if (!result.results[0]) result.results[0] = {};
+
+      result.results[0].answers = repairedAnswers;
+
+      // Inject debug metadata
+      result._debugMeta = {
+        raw_llm_count: rawCount,
+        duplicate_count: duplicateCount,
+        repaired_count: missingCount,
+        validation_passed: (missingCount === 0 && duplicateCount === 0)
+      };
+
+      console.log(`[Validation V51] Final Output: ${repairedAnswers.length} answers (Repaired: ${missingCount}, Duplicates: ${duplicateCount})`);
+    }
+
     console.log(`Done: ${provider}, mode: ${mode}`);
     return jsonResponse({ ...result, _provider: provider });
 
