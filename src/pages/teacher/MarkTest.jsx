@@ -775,9 +775,9 @@ export default function MarkTest() {
                                         // Draw only the cropped portion, scaling it in the same pass
                                         ctx.drawImage(videoRef, cropX, cropY, cropWidth, cropHeight, 0, 0, targetWidth, targetHeight);
 
-                                        // Extract at MAXIMUM quality (1.0) to prevent double-compression generation loss.
-                                        // The Web Worker will handle the final 0.75 compression pass later.
-                                        const rawBase64 = canvas.toDataURL('image/jpeg', 1.0);
+                                        // Extract as TRUE LOSSLESS PNG to completely eliminate double-encoding artifacts.
+                                        // The Web Worker will handle the single, final JPEG 0.75 compression pass later.
+                                        const rawBase64 = canvas.toDataURL('image/png');
 
                                         // Push to state array
                                         setCapturedImages(prev => [...prev, rawBase64]);
