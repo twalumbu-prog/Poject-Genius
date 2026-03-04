@@ -351,60 +351,114 @@ export async function classifyQuestionRegions(imageBitmap, markingSchemeCount) {
     const gray = computeGrayscale(finalImageData);
     const binary = binarize(gray, width, height, 180); // Strict threshold to isolate dark print from faint shading
 
-    // 2. Vertical Guardrail
-    const vProfile = computeVerticalProjection(binary, width, height);
-    const isMultiColumn = detectMultiColumn(vProfile, height);
-
-    if (isMultiColumn) {
-        console.warn("[Stage A] Multi-column layout detected. Fallback entire page to OCR VLM pipeline to prevent horizontal slicing disasters.");
-        // We bypass the rest and just tell the merger to punt everything to Gemini
-        return {
-            layout: "multi-column",
-            rois: [],
-            processingTimeMs: Math.round(performance.now() - t0),
-            correctedImageData: finalImageData
-        };
-    }
-
-    // 3. Horizontal Slicing
+    // 2. Horizontal Slicing
     const hProfile = computeHorizontalProjection(binary, width, height);
     const slices = sliceROIsViaHPP(hProfile, height);
     console.log(`[Stage A] Found ${slices.length} distinct horizontal regions across ${height}px height.`);
 
-    // 4. Analyze each ROI
-    const classifiedROIs = [];
-    let qNum = 1;
+    let allBubbleGroups = [];
 
     for (const slice of slices) {
         const blobs = findBlobs(binary, width, height, slice.y, slice.height);
         const classification = classifyROI(blobs);
 
-        // Keep all ROIs even unknown/ocr, so sequential numbers line up
-        classifiedROIs.push({
-            inferred_question_number: qNum++, // We infer Q number by down-page structural order
-            y: slice.y,
-            height: slice.height,
-            type: classification.type,
-            confidence: classification.confidence,
-            omr_options: classification.type === 'omr' ? classification.circleBlobs : []
-        });
+        // If a row has pure OMR bubbles (or even if it's mixed but has bubbles)
+        // We must extract the validCircles and group them by X-distance to handle
+        // multiple questions sitting on the exact same horizontal slice
+        const validCircles = classification.circleBlobs;
+        if (validCircles && validCircles.length > 0) {
+            let currentGroup = [];
+            for (let i = 0; i < validCircles.length; i++) {
+                const c = validCircles[i];
+                if (currentGroup.length === 0) {
+                    currentGroup.push(c);
+                } else {
+                    const last = currentGroup[currentGroup.length - 1];
+                    const avgW = ((last.maxX - last.minX) + (c.maxX - c.minX)) / 2;
+                    const gap = c.minX - last.maxX;
+                    // If the gap between circles is more than ~2x the width of a circle,
+                    // it is highly likely jumping to the next question's bubble column.
+                    if (gap > avgW * 2.0) {
+                        allBubbleGroups.push({
+                            y: slice.y,
+                            height: slice.height,
+                            confidence: Math.min(1.0, currentGroup.length / 4), // Roughly
+                            circleBlobs: currentGroup
+                        });
+                        currentGroup = [c];
+                    } else {
+                        currentGroup.push(c);
+                    }
+                }
+            }
+            if (currentGroup.length > 0) {
+                allBubbleGroups.push({
+                    y: slice.y,
+                    height: slice.height,
+                    confidence: Math.min(1.0, currentGroup.length / 4),
+                    circleBlobs: currentGroup
+                });
+            }
+        }
     }
 
-    // Sanity Check: If we found wildly more ROIs than expected questions, it means
-    // there was too much noise/clutter on the page. We should downgrade confidence.
-    if (markingSchemeCount && classifiedROIs.length > markingSchemeCount * 1.5) {
-        console.warn("[Stage A] Detected ROI count far exceeds marking scheme. Forcing fallback to OCR.");
-        classifiedROIs.forEach(roi => {
-            roi.type = 'ocr';
-            roi.confidence = 1.0;
-        });
+    // 4. Validate and Route
+    // Filter out obvious noise (a question MUST have at least 3 bubbles horizontally)
+    allBubbleGroups = allBubbleGroups.filter(g => g.circleBlobs.length >= 3);
+
+    // 5. Column-Major Numbering
+    // Determine the center X of each group
+    allBubbleGroups.forEach(g => {
+        g.centerX = (g.circleBlobs[0].minX + g.circleBlobs[g.circleBlobs.length - 1].maxX) / 2;
+    });
+
+    const columns = [];
+    // Sort left-to-right primarily
+    const sortedByX = [...allBubbleGroups].sort((a, b) => a.centerX - b.centerX);
+
+    for (const g of sortedByX) {
+        let placed = false;
+        for (const col of columns) {
+            const colAvgX = col.reduce((sum, item) => sum + item.centerX, 0) / col.length;
+            // If the center X sits within ~8% of the page width of a column, group it
+            if (Math.abs(g.centerX - colAvgX) < width * 0.08) {
+                col.push(g);
+                placed = true;
+                break;
+            }
+        }
+        if (!placed) {
+            columns.push([g]);
+        }
+    }
+
+    // Sort columns strictly left-to-right
+    columns.sort((a, b) => a[0].centerX - b[0].centerX);
+
+    const classifiedROIs = [];
+    let qNum = 1;
+
+    // Number them going down each column
+    for (const col of columns) {
+        // Sort top-to-bottom within the column
+        col.sort((a, b) => a.y - b.y);
+        for (const g of col) {
+            classifiedROIs.push({
+                inferred_question_number: qNum++,
+                y: g.y,
+                height: g.height, // Keep structural properties for debugging UI
+                type: 'omr',
+                confidence: 0.9, // Bubble clusters structured in grids are highly confident
+                omr_options: g.circleBlobs
+            });
+        }
     }
 
     const t1 = performance.now();
-    console.log(`[Stage A] Completed in ${Math.round(t1 - t0)}ms. Classified ${classifiedROIs.length} regions.`);
+    console.log(`[Stage A] Completed in ${Math.round(t1 - t0)}ms. Grouped ${classifiedROIs.length} pure-OMR question blocks across ${columns.length} columns.`);
 
     return {
-        layout: "single-column",
+        layout: "hybrid-grid",
         regions: classifiedROIs,
         processingTimeMs: Math.round(t1 - t0),
         correctedImageData: finalImageData // Pass the straightened image forward to Stage B

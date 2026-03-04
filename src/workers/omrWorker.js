@@ -18,7 +18,7 @@ self.onmessage = async (e) => {
             const omrResults = [];
 
             // 2. Execute Stage B on confidently structured pure-OMR regions
-            if (layoutResult.layout === 'single-column') {
+            if (layoutResult.layout === 'hybrid-grid' || layoutResult.layout === 'single-column') {
                 const imageData = layoutResult.correctedImageData;
                 const width = imageData.width;
 
