@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { supabase } from '../../lib/supabase';
+import { SyllabusService } from '../../lib/syllabusService';
 import { ArrowLeft, Sparkles, Wand2, BookOpen, Layers, Check, Calculator, PieChart } from 'lucide-react';
 import './AITestGenerator.css';
 
@@ -290,12 +291,79 @@ export default function AITestGenerator() {
                 }
             }
 
-            // 3. Post-process and Save
-            const finalQuestions = allQuestions.slice(0, totalRequired).map((q, index) => ({
+            // 3. Post-process: number questions
+            const rawQuestions = allQuestions.slice(0, totalRequired).map((q, index) => ({
                 ...q,
                 question_number: index + 1
             }));
 
+            // 4. Resolve topic_id / subtopic_id / learning_outcome_id for every question
+            //    Strategy:
+            //    a) Build a fast-lookup map from the already-known selectedTopic IDs (topic name → topic id)
+            //    b) Load the full grade syllabus once (for subtopic + learning_outcome resolution)
+            //    c) Per question: resolve topic_id → subtopic_id → learning_outcome_id
+            console.log('[TopicLink] Resolving syllabus IDs for', rawQuestions.length, 'questions...');
+
+            // 4a. Build map from selected topic names → {id, subtopics[]}
+            const selectedTopicMap = new Map();
+            for (const t of formData.selectedTopics) {
+                if (t.id && t.name) selectedTopicMap.set(t.name.toLowerCase().trim(), t);
+            }
+
+            // 4b. Load full grade syllabus for subtopic + learning_outcome resolution
+            let gradeSyllabus = null;
+            try {
+                gradeSyllabus = await SyllabusService.getSyllabusForGrade(formData.grade);
+            } catch (syllabusErr) {
+                console.warn('[TopicLink] Could not load grade syllabus, questions will save without IDs:', syllabusErr.message);
+            }
+
+            // 4c. Resolve each question
+            const finalQuestions = rawQuestions.map(q => {
+                const resolved = { ...q };
+
+                // Resolve topic_id: first check the selected topics map (exact/known IDs)
+                const topicNameLower = (q.topic || '').toLowerCase().trim();
+                let topicId = null;
+
+                // Try the known-selected topics first (most reliable)
+                const knownTopic = selectedTopicMap.get(topicNameLower);
+                if (knownTopic) {
+                    topicId = knownTopic.id;
+                } else if (gradeSyllabus) {
+                    // Fallback to fuzzy syllabus lookup
+                    topicId = SyllabusService.resolveTopic(gradeSyllabus, q.topic, formData.subject);
+                }
+
+                resolved.topic_id = topicId || null;
+
+                // Resolve subtopic_id if we have a topic and a subtopic string
+                if (topicId && q.subtopic && gradeSyllabus) {
+                    resolved.subtopic_id = SyllabusService.resolveSubtopic(gradeSyllabus, q.subtopic, topicId, formData.subject) || null;
+                } else {
+                    resolved.subtopic_id = null;
+                }
+
+                // Resolve learning_outcome_id if we have a subtopic
+                if (resolved.subtopic_id && q.learning_outcome && gradeSyllabus) {
+                    resolved.learning_outcome_id = SyllabusService.resolveLearningOutcome(gradeSyllabus, q.learning_outcome, resolved.subtopic_id, formData.subject) || null;
+                } else {
+                    resolved.learning_outcome_id = null;
+                }
+
+                if (resolved.topic_id) {
+                    console.log(`[TopicLink] Q${q.question_number} "${q.topic}" → topic_id: ${resolved.topic_id}, subtopic_id: ${resolved.subtopic_id}`);
+                } else {
+                    console.warn(`[TopicLink] Q${q.question_number} "${q.topic}" → could not resolve to any topic ID`);
+                }
+
+                return resolved;
+            });
+
+            const linkedCount = finalQuestions.filter(q => q.topic_id).length;
+            console.log(`[TopicLink] ${linkedCount}/${finalQuestions.length} questions successfully linked to syllabus`);
+
+            // 5. Build topic summary
             const topicSummary = {};
             if (availableTopics.length > 0) {
                 formData.selectedTopics.forEach(t => topicSummary[t.name] = t.count);
@@ -305,11 +373,13 @@ export default function AITestGenerator() {
 
             if (!user) throw new Error("User session not found");
 
+            // 6. Save test record
             const { data: test, error: testError } = await supabase
                 .from('tests')
                 .insert({
                     teacher_id: user.id,
                     subject: formData.subject,
+                    grade: formData.grade,
                     title: `AI Test: ${formData.subject} - ${formData.grade}`,
                     status: 'scheme_ready',
                 })
@@ -318,6 +388,7 @@ export default function AITestGenerator() {
 
             if (testError) throw testError;
 
+            // 7. Save marking scheme with fully resolved questions
             const { error: schemeError } = await supabase
                 .from('marking_schemes')
                 .insert({
@@ -328,7 +399,7 @@ export default function AITestGenerator() {
 
             if (schemeError) throw schemeError;
 
-            alert('Test generated successfully!');
+            alert(`Test generated! ${linkedCount}/${finalQuestions.length} questions linked to syllabus topics.`);
             navigate(`/teacher/test/${test.id}`);
 
         } catch (error) {
