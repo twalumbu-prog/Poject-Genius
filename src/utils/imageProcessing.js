@@ -14,8 +14,6 @@ const PDF_RENDER_SCALE = 1.8; // ~1620px wide for an A4 page — good for OCR
 import ImageWorker from '../workers/imageWorker.js?worker';
 
 
-import ImageWorker from "../workers/imageWorker.js?worker";
-
 /**
  * Processes an image for Vision Language Model OCR (Gemini).
  * Offloads heavy downscaling, mild contrast, sharpening, and compression to a Web Worker.
@@ -28,7 +26,7 @@ export function processForVLM(imageObj, faintTextAssist = false) {
     return new Promise(async (resolve, reject) => {
         try {
             let blob = imageObj;
-            
+
             // If passed a base64 string, convert it to a Blob first
             if (typeof imageObj === "string" && imageObj.startsWith("data:image/")) {
                 const res = await fetch(imageObj);
@@ -39,7 +37,7 @@ export function processForVLM(imageObj, faintTextAssist = false) {
 
             const worker = new ImageWorker();
             const id = Date.now().toString() + Math.random().toString();
-            
+
             worker.onmessage = (e) => {
                 const { type, id: resId, result, error } = e.data;
                 if (resId === id) {
