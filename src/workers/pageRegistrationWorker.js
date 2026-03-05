@@ -66,8 +66,17 @@ function processPage(imageBitmap) {
         console.log(`[Stage 0] High confidence page detected (${Math.round(bestQuad.confidence * 100)}%). Warping...`);
 
         // Define standard output size (e.g. A4 aspect roughly 1:1.414)
-        const TARGET_H = 1800;
-        const TARGET_W = Math.round(1800 / 1.414); // ~1273
+        const PORTRAIT_H = 1800;
+        const PORTRAIT_W = Math.round(1800 / 1.414); // ~1273
+
+        // Check if the physical quad is wider than it is tall (landscape capture)
+        const [tl, tr, br, bl] = originalQuad;
+        const widthT = Math.hypot(tr.x - tl.x, tr.y - tl.y);
+        const heightL = Math.hypot(bl.x - tl.x, bl.y - tl.y);
+
+        const isLandscapeQuad = widthT > heightL;
+        const targetW = isLandscapeQuad ? PORTRAIT_H : PORTRAIT_W;
+        const targetH = isLandscapeQuad ? PORTRAIT_W : PORTRAIT_H;
 
         // Draw original full size to get pixels
         const fullCanvas = new OffscreenCanvas(width, height);
@@ -75,7 +84,7 @@ function processPage(imageBitmap) {
         fullCtx.drawImage(imageBitmap, 0, 0);
         const fullImgData = fullCtx.getImageData(0, 0, width, height);
 
-        const warpedImageData = warpPerspective(fullImgData, originalQuad, TARGET_W, TARGET_H);
+        const warpedImageData = warpPerspective(fullImgData, originalQuad, targetW, targetH);
 
         // --- Stage 0.5: Orientation Correction ---
         const correctedImageData = detectAndFixRotation(warpedImageData);
@@ -478,50 +487,65 @@ function detectAndFixRotation(imageData) {
 
     const hPeaks = countPeaks(hProfile);
     const vPeaks = countPeaks(vProfile);
-
-    // Anchor detection: Look for solid black squares in the corners
-    const anchors = findAnchors(imageData);
-    console.log(`[Orientation] Anchors found: ${anchors.length}`);
-
-    // If we have 3 or more anchors, we can determine orientation with high confidence
-    if (anchors.length >= 3) {
-        // Find which corner is missing an anchor to determine rotation
-        // Standard Project Genius sheet has 4 anchors
-        // If it's rotated, the relative positions of anchors change
-    }
-
     console.log(`[Orientation] hPeaks: ${hPeaks}, vPeaks: ${vPeaks}, imgAspect: ${(width / height).toFixed(2)}`);
 
-    // SAFETY CHECK: If the warp already produced a portrait image (height > width),
-    // we trust the warp output and skip rotation. The warp to TARGET_W x TARGET_H
-    // already produces a portrait aspect ratio; rotating it again would be wrong.
-    if (height > width) {
-        // Image is already portrait. Only check for upside-down (180° rotation).
-        const topDensity = average(hProfile.slice(0, Math.floor(sh / 4)));
-        const botDensity = average(hProfile.slice(Math.floor(3 * sh / 4)));
-        if (botDensity < topDensity * 0.5) {
-            console.warn("[Orientation] Page is portrait but upside-down. Rotating 180deg...");
-            return rotateImageData(imageData, 180);
+    let workingData = imageData;
+
+    // STEP 1: Ensure it's Portrait
+    if (width > height) {
+        // Image is landscape. The rows are currently running vertically.
+        // We need to rotate 90 degrees.
+        // Let's decide +90 (CW) or -90 (CCW) by checking ink density.
+        // The headers (QR, Name, etc.) should be at the 'top'.
+        const leftDensity = average(vProfile.slice(0, Math.floor(sw / 4)));
+        const rightDensity = average(vProfile.slice(Math.floor(3 * sw / 4)));
+
+        if (leftDensity > rightDensity) {
+            // Top of the page is on the left -> Rotate 90 CW
+            console.warn("[Orientation] Landscape (Top is Left). Rotating 90° CW...");
+            workingData = rotateImageData(workingData, 90);
+        } else {
+            // Top of the page is on the right -> Rotate 90 CCW (or 270 CW)
+            console.warn("[Orientation] Landscape (Top is Right). Rotating 270° CW...");
+            workingData = rotateImageData(workingData, 270);
         }
-        console.log("[Orientation] Image is portrait. No rotation needed.");
-        return imageData;
     }
 
-    // Image is landscape (width > height) — if it's an OMR sheet,
-    // the question rows should form strong HORIZONTAL bands.
-    // If vPeaks > hPeaks, the OMR rows are running vertically = 90° CW rotation needed.
-    if (vPeaks > hPeaks * 1.5) {
-        console.warn("[Orientation] Landscape image with vertical structure. Rotating +90deg CW...");
-        return rotateImageData(imageData, 90);
+    // STEP 2: Check for Upside-Down (180°)
+    // Recalculate horizontal profile for the now-portrait image
+    const finalHProfile = new Float32Array(Math.max(width, height));
+    const isWarped = workingData !== imageData;
+    const cw = workingData.width;
+    const ch = workingData.height;
+
+    // Fast density check top vs bottom 15%
+    const checkY1 = Math.floor(ch * 0.15);
+    const checkY2 = Math.floor(ch * 0.85);
+
+    let topInk = 0, bottomInk = 0;
+    for (let y = 0; y < checkY1; y++) {
+        for (let x = 0; x < cw; x += 4) {
+            const i = (y * cw + x) * 4;
+            if (workingData.data[i] < 128) topInk++;
+        }
     }
-    if (hPeaks > vPeaks * 1.5) {
-        console.warn("[Orientation] Landscape image with horizontal structure. Rotating -90deg CCW...");
-        return rotateImageData(imageData, 270);
+    for (let y = checkY2; y < ch; y++) {
+        for (let x = 0; x < cw; x += 4) {
+            const i = (y * cw + x) * 4;
+            if (workingData.data[i] < 128) bottomInk++;
+        }
     }
 
-    // No clear signal — leave as is
-    console.log("[Orientation] No clear rotation needed. Using as-is.");
-    return imageData;
+    console.log(`[Orientation] Portrait Header Ink: Top=${topInk}, Bottom=${bottomInk}`);
+
+    // If the bottom has significantly more ink than the top, it's upside down.
+    if (bottomInk > topInk * 1.5) {
+        console.warn("[Orientation] Page is upside-down. Rotating 180°...");
+        workingData = rotateImageData(workingData, 180);
+    }
+
+    console.log("[Orientation] Final upright portrait image confirmed.");
+    return workingData;
 }
 
 function countPeaks(profile) {

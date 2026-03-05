@@ -468,53 +468,10 @@ function detectGridOnImage(imageData, expectedOptions = 4) {
 }
 
 function discoverGridRobust(imageData, expectedOptions = 4) {
-    console.log(`[OPR Grid] Analysing best orientation for ${imageData.width}x${imageData.height} scan...`);
-
-    const orientations = [
-        { name: '0° (Portrait)', data: imageData },
-        { name: '90°CW (Landscape R)', data: rotateImageData90CW(imageData) },
-        { name: '180° (Portrait Upside-Down)', data: rotateImageData180(imageData) },
-        { name: '270°CW (Landscape L)', data: rotateImageData270(imageData) }
-    ];
-
-    let bestResult = null;
-    let bestScore = -1;
-    let bestOrient = '';
-
-    for (const orient of orientations) {
-        const result = detectGridOnImage(orient.data, expectedOptions);
-        console.log(`[OPR Grid] Orientation ${orient.name}: Score=${Math.round(result.score)} blocks=${result.blocks} count=${result.count}`);
-
-        if (result.score > bestScore) {
-            bestScore = result.score;
-            bestResult = result;
-            bestOrient = orient.name;
-        }
-    }
-
-    // -- UP-SIDE DOWN CHECK (0° vs 180°) --
-    // If we picked a portrait orientation, verify if it should be flipped 180.
-    if (bestOrient.includes('Portrait')) {
-        const checkData = orientations.find(o => o.name === bestOrient).data;
-        const topDensity = getAreaDensity(checkData, 0, 0, checkData.width, checkData.height * 0.15);
-        const bottomDensity = getAreaDensity(checkData, 0, checkData.height * 0.85, checkData.width, checkData.height * 0.15);
-
-        console.log(`[OPR Orientation] Portrait Header density: Top=${topDensity.toFixed(3)}, Bottom=${bottomDensity.toFixed(3)}`);
-
-        // Headers/QR at top should be denser than empty footer
-        if (bottomDensity > topDensity * 1.5) {
-            console.warn(`[OPR Orientation] Detected upside-down page. Flipping 180°...`);
-            const flipped = rotateImageData180(checkData);
-            const flippedResult = detectGridOnImage(flipped, expectedOptions);
-            return { gridModel: flippedResult, finalImageData: flipped };
-        }
-    }
-
-    console.log(`[OPR Grid] Selected orientation: ${bestOrient} with score ${Math.round(bestScore)}`);
-
-    // Find the data for the best orientation
-    const finalData = orientations.find(o => o.name === bestOrient).data;
-    return { gridModel: bestResult, finalImageData: finalData };
+    // Orientation is now strictly handled and corrected by pageRegistrationWorker.js
+    // before the OMR pipeline even begins. The imageData here is guaranteed to be upright portrait.
+    const result = detectGridOnImage(imageData, expectedOptions);
+    return { gridModel: result, finalImageData: imageData };
 }
 
 /**
