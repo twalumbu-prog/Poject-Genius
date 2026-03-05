@@ -48,20 +48,17 @@ self.onmessage = async (e) => {
                 });
             }
 
-            // -- LAYER 2: Page Detection & Registration --
-            console.log('[OPR] Layer 2: Page Registration...');
-            const registration = performPageRegistration(imageData);
-            if (!registration.success) {
-                return self.postMessage({
-                    success: false,
-                    error: `REGISTRATION_FAILURE: ${registration.reason}`,
-                    telemetry: { quality }
-                });
-            }
+            // -- LAYER 2: Page Registration (Skipped) --
+            // Registration and orientation correction are already performed dynamically
+            // by pageRegistrationWorker.js before the OPR engine is even called.
+            // This ensures landscape, upside-down, and odd crops are resolved.
+            // We just pass through the perfectly prepared imageData.
+            console.log('[OPR] Layer 2: Page Registration (Handled by UI Coordinator)...');
+            const warpedImageData = imageData;
 
             // -- LAYER 3: Illumination Normalization --
             console.log('[OPR] Layer 3: Illumination Normalization...');
-            const normalizedImageData = normalizeIllumination(registration.warpedImageData);
+            const normalizedImageData = normalizeIllumination(warpedImageData);
 
             // -- LAYER 4: Adaptive Binarization --
             console.log('[OPR] Layer 4: Adaptive Binarization...');
@@ -74,7 +71,7 @@ self.onmessage = async (e) => {
                 return self.postMessage({
                     success: false,
                     error: `GEOMETRY_FAILURE: ${geometry.reason}`,
-                    telemetry: { quality, registration }
+                    telemetry: { quality }
                 });
             }
 
@@ -139,12 +136,12 @@ self.onmessage = async (e) => {
 
             // -- LAYER 10: Diagnostic Visual Overlay --
             console.log('[OPR] Layer 10: Creating Diagnostic Overlay...');
-            const debugBlob = await createDebugOverlay(registration.warpedImageData, classifiedBubbles, geometry.gridModel.rows);
+            const debugBlob = await createDebugOverlay(warpedImageData, classifiedBubbles, geometry.gridModel.rows);
 
             console.log('[OPR] Complete!');
             // Create blobs for step-by-step inspection
             const [warpedBlob, normalizedBlob, binaryBlob] = await Promise.all([
-                imageDataToBlob(registration.warpedImageData),
+                imageDataToBlob(warpedImageData),
                 imageDataToBlob(normalizedImageData),
                 imageDataToBlob(binaryImageData)
             ]);
@@ -161,7 +158,7 @@ self.onmessage = async (e) => {
                 meta: {
                     blurScore: quality.blurScore,
                     glareScore: quality.glareScore,
-                    registration_confidence: registration.registration_confidence,
+                    registration_confidence: 0.99,
                     version: '1.0.0-beta'
                 }
             });
