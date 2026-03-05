@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
-import { ArrowLeft, Camera, Upload, CheckCircle, AlertCircle, Sparkles, ChevronDown, ChevronUp, X, FileCheck } from 'lucide-react';
+import { ArrowLeft, Camera, Upload, CheckCircle, AlertCircle, Sparkles, ChevronDown, ChevronUp, X, FileCheck, Eye, Search, Play, ArrowRight } from 'lucide-react';
 import { explodeFilesToImages, processForVLM, blobToBase64 } from '../../utils/imageProcessing';
 import { normalizeQuestionNumber } from '../../utils/ocrValidation';
 import { mergeHybridAnswers } from '../../utils/hybridAnswerMerger';
@@ -52,6 +52,13 @@ export default function MarkTest() {
     const [scanMode, setScanMode] = useState('upload'); // 'upload' | 'camera'
     const [scanScriptCount, setScanScriptCount] = useState(0);
     const [scanComplete, setScanComplete] = useState(null);
+
+    // --- Granular Inspection State ---
+    const [inspectionMode, setInspectionMode] = useState(false);
+    const [isAwaitingStep, setIsAwaitingStep] = useState(false);
+    const [inspectionStep, setInspectionStep] = useState(0); // 1: Registration, 2: Geometry, 3: AI
+    const [inspectionData, setInspectionData] = useState(null);
+    const approveStepRef = React.useRef(null);
     const scanTimers = React.useRef([]); // all pending setTimeout ids
 
     const SCAN_STEPS_UPLOAD = [
@@ -139,6 +146,81 @@ export default function MarkTest() {
     }, [testId]);
 
 
+
+    // --- Components ---
+    const InspectionSidebar = () => {
+        if (!isAwaitingStep || !inspectionData) return null;
+        const { title, image, metadata, checklist } = inspectionData;
+
+        return (
+            <div className="inspection-overlay" style={{
+                position: 'fixed', top: 0, right: 0, bottom: 0, left: 0,
+                backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 9999,
+                display: 'flex', color: 'white', backdropFilter: 'blur(8px)'
+            }}>
+                <div className="inspection-main" style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px' }}>
+                    <img src={image} alt="Process Stage" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', boxShadow: '0 20px 50px rgba(0,0,0,0.5)', borderRadius: '8px' }} />
+                    <div style={{ position: 'absolute', top: 20, left: 20, background: 'rgba(0,0,0,0.6)', padding: '8px 16px', borderRadius: '20px', fontSize: '0.8rem', border: '1px solid rgba(255,255,255,0.1)' }}>
+                        <Sparkles size={14} style={{ marginRight: 8, verticalAlign: 'middle', color: '#60a5fa' }} />
+                        Stage {inspectionStep} of 3
+                    </div>
+                </div>
+
+                <div className="inspection-sidebar" style={{
+                    width: '400px', background: '#111827', borderLeft: '1px solid #374151',
+                    display: 'flex', flexDirection: 'column', padding: '32px'
+                }}>
+                    <div style={{ marginBottom: '32px' }}>
+                        <h2 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '8px' }}>{title}</h2>
+                        <p style={{ color: '#9ca3af', fontSize: '0.9rem' }}>Review the algorithm's output before proceeding.</p>
+                    </div>
+
+                    <div style={{ flex: 1, overflowY: 'auto', paddingRight: '8px' }}>
+                        <h3 style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#6b7280', marginBottom: '16px' }}>Checklist</h3>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {checklist.map((item, i) => (
+                                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: '#1f2937', borderRadius: '12px' }}>
+                                    {item.status === 'pass' ? <CheckCircle size={18} color="#10b981" /> :
+                                        item.status === 'fail' ? <X size={18} color="#ef4444" /> :
+                                            item.status === 'warn' ? <AlertCircle size={18} color="#f59e0b" /> :
+                                                <Search size={18} color="#60a5fa" />}
+                                    <span style={{ fontSize: '0.95rem' }}>{item.label}</span>
+                                </div>
+                            ))}
+                        </div>
+
+                        {checklist.some(c => c.status === 'fail' || c.status === 'warn') && (
+                            <div style={{ marginTop: '24px', padding: '16px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '12px' }}>
+                                <h3 style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#ef4444', marginBottom: '8px', fontWeight: 700 }}>Diagnostic Recommendation</h3>
+                                <p style={{ fontSize: '0.85rem', color: '#fca5a5', lineHeight: 1.5 }}>
+                                    {inspectionStep === 1 ? 'Page bounds or anchors undetected. Ensure all 4 black borders are clearly visible and well-lit. Avoid shadows across corners.' :
+                                        inspectionStep === 2 ? 'The grid discovery lost its way. This often happens if the page is too tilted (>5°) or if the column spacing is non-standard.' :
+                                            'AI rationale failed or extraction returned empty results. Verify API Key and ensure the image resolution is high enough to read the text.'}
+                                </p>
+                            </div>
+                        )}
+
+                        <h3 style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#6b7280', marginTop: '32px', marginBottom: '16px' }}>Data Trace</h3>
+                        <div style={{ background: '#000', padding: '16px', borderRadius: '12px', fontSize: '0.8rem', fontFamily: 'monospace', overflowY: 'auto', maxHeight: '150px', color: '#4ade80' }}>
+                            <pre>{JSON.stringify(metadata, null, 2)}</pre>
+                        </div>
+                    </div>
+
+                    <div style={{ marginTop: '32px', display: 'flex', gap: '12px' }}>
+                        <button
+                            className="btn btn-primary"
+                            style={{ flex: 1, padding: '16px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                            onClick={() => approveStepRef.current && approveStepRef.current()}
+                        >
+                            <Play size={18} fill="currentColor" />
+                            Next Step
+                            <ArrowRight size={18} />
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
 
     async function fetchPupils() {
         try {
@@ -241,6 +323,19 @@ export default function MarkTest() {
 
             const processItem = async (item) => {
                 const { base64, label, index } = item;
+                const awaitApproval = async (step, data) => {
+                    if (!inspectionMode) return;
+                    setInspectionData(data);
+                    setInspectionStep(step);
+                    setIsAwaitingStep(true);
+                    return new Promise(resolve => {
+                        approveStepRef.current = () => {
+                            setIsAwaitingStep(false);
+                            resolve();
+                        };
+                    });
+                };
+
                 setProcessingStatus(`Marking script ${index + 1} of ${total}${total > 1 ? `: ${label}` : ''}...`);
 
                 try {
@@ -262,6 +357,18 @@ export default function MarkTest() {
 
                     const regResponse = await regPromise;
                     regWorker.terminate();
+
+                    // --- BREAKPOINT 1: REGISTRATION ---
+                    await awaitApproval(1, {
+                        title: 'Stage 1: Page Registration',
+                        image: base64,
+                        metadata: regResponse,
+                        checklist: [
+                            { label: 'Anchors Found', status: regResponse.page_detected ? 'pass' : 'fail' },
+                            { label: 'Orientation Confidence', status: regResponse.page_confidence > 0.5 ? 'pass' : 'warn' },
+                            { label: 'Rotation Applied', status: regResponse.rotation !== 0 ? 'info' : 'pass' }
+                        ]
+                    });
 
                     let finalImageBitmap;
                     let aiBase64 = base64; // Default to original for AI
@@ -341,6 +448,18 @@ export default function MarkTest() {
                     const omrResponse = await omrPromise;
                     omrWorker.terminate();
 
+                    // --- BREAKPOINT 2: GEOMETRY ---
+                    await awaitApproval(2, {
+                        title: 'Stage 2: Grid & Geometry',
+                        image: finalBase64,
+                        metadata: omrResponse,
+                        checklist: [
+                            { label: 'Grid Blocks Detected', status: omrResponse.omrResults?.length > 0 ? 'pass' : 'fail' },
+                            { label: 'Column Count', status: (omrResponse.layoutResult?.blocks || 0) >= 1 ? 'pass' : 'warn' },
+                            { label: 'Multi-Column detected', status: (omrResponse.layoutResult?.blocks || 0) > 1 ? 'pass' : 'info' }
+                        ]
+                    });
+
                     if (!omrResponse.success) {
                         console.warn(`[${engine.toUpperCase()}] Worker failed for script ${index + 1}: ${omrResponse.error}. Falling back to full OCR.`);
                         if (omrResponse.stack) console.error(`[${engine.toUpperCase()} Stack]`, omrResponse.stack);
@@ -419,6 +538,18 @@ export default function MarkTest() {
                     }
 
                     const data = await response.json();
+
+                    // --- BREAKPOINT 3: AI EXTRACTION ---
+                    await awaitApproval(3, {
+                        title: 'Stage 3: AI Payload & Rationale',
+                        image: aiBase64,
+                        metadata: data,
+                        checklist: [
+                            { label: 'AI Response Received', status: data.results ? 'pass' : 'fail' },
+                            { label: 'Rationale Complete', status: data.results?.[0]?.answers?.[0]?.rationale ? 'pass' : 'warn' },
+                            { label: 'Pattern Check Passed', status: data.validation_passed ? 'pass' : 'warn' }
+                        ]
+                    });
 
                     // --- STAGE D: HYBRID MERGER ---
                     const hybridPayload = mergeHybridAnswers(omrResults, data, markingScheme.questions);
@@ -929,10 +1060,29 @@ export default function MarkTest() {
             <div className="page-header">
                 <h1>Mark {test.subject}</h1>
                 <p className="subtitle">Upload student scripts for automatic marking</p>
+                <div style={{ marginTop: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <label style={{
+                        display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer',
+                        padding: '8px 16px', background: inspectionMode ? 'rgba(96, 165, 250, 0.1)' : 'transparent',
+                        border: `1px solid ${inspectionMode ? '#60a5fa' : 'rgba(255,255,255,0.1)'}`,
+                        borderRadius: '20px', transition: 'all 0.2s'
+                    }}>
+                        <Eye size={16} color={inspectionMode ? '#60a5fa' : '#6b7280'} />
+                        <span style={{ fontSize: '0.85rem', color: inspectionMode ? '#fff' : '#9ca3af' }}>Inspect Step-by-Step</span>
+                        <input
+                            type="checkbox"
+                            checked={inspectionMode}
+                            onChange={(e) => setInspectionMode(e.target.checked)}
+                            style={{ display: 'none' }}
+                        />
+                    </label>
+                </div>
                 <datalist id="pupil-list">
                     {pupils.map(p => <option key={p.id} value={p.name} />)}
                 </datalist>
             </div>
+
+            <InspectionSidebar />
 
             {isCameraOpen && (
                 <div className="camera-modal">
