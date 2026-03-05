@@ -251,8 +251,7 @@ function detectGridOnImage(imageData) {
         count++;
     }
     const meanLuma = totalLuma / count;
-    // Tighter threshold to prioritize dark ink and ignore grey shadows/noise
-    const inkThreshold = Math.max(95, meanLuma - 45);
+    const inkThreshold = Math.max(100, meanLuma - 35);
 
     // -- STEP B: HORIZONTAL PROJECTION (Global Rows) --
     const hProfile = new Float32Array(height);
@@ -267,11 +266,17 @@ function detectGridOnImage(imageData) {
 
     // Detect row peaks
     const sortedH = [...hProfile].sort((a, b) => a - b);
-    const hThreshold = Math.max(3, sortedH[Math.floor(sortedH.length * 0.85)]);
+    const hThreshold = Math.max(4, sortedH[Math.floor(sortedH.length * 0.85)]);
+    // DENSITY CAP: A row of bubbles shouldn't be a solid black line across the whole page.
+    // If width is 1200, 3 columns of 5 bubbles (15 bubbles) * ~20px = 300px. 
+    // Plus question numbers and noise, let's cap at 50% of width.
+    const hDensityCap = width * 0.55;
+
     const candidateRows = [];
     let lastY = -100;
-    for (let y = 50; y < height - 50; y++) {
-        if (hProfile[y] > hThreshold && hProfile[y] >= hProfile[y - 1] && hProfile[y] >= hProfile[y + 1] && y - lastY > 24) {
+    // SKIP HEADER: Start row detection at 200px to avoid scanning "Name:", school name, etc.
+    for (let y = 200; y < height - 100; y++) {
+        if (hProfile[y] > hThreshold && hProfile[y] < hDensityCap && hProfile[y] >= hProfile[y - 1] && hProfile[y] >= hProfile[y + 1] && y - lastY > 20) {
             candidateRows.push({ y, strength: hProfile[y] });
             lastY = y;
         }
@@ -285,7 +290,8 @@ function detectGridOnImage(imageData) {
     const validRows = candidateRows.filter((r, i) => {
         const prev = i > 0 ? r.y - candidateRows[i - 1].y : null;
         const next = i < candidateRows.length - 1 ? candidateRows[i + 1].y - candidateRows[i].y : null;
-        return (prev && Math.abs(prev - medianSpacing) < medianSpacing * 0.4) || (next && Math.abs(next - medianSpacing) < medianSpacing * 0.4);
+        // Stricter spacing validation (±30%)
+        return (prev && Math.abs(prev - medianSpacing) < medianSpacing * 0.3) || (next && Math.abs(next - medianSpacing) < medianSpacing * 0.3);
     });
 
     // -- STEP C: ROW-AWARE VERTICAL PROJECTION --
@@ -294,9 +300,9 @@ function detectGridOnImage(imageData) {
     const vProfile = new Float32Array(width);
     validRows.forEach(row => {
         const y = row.y;
-        for (let x = 30; x < width - 30; x++) {
-            // Sample a 9px vertical strip around each row's center
-            for (let dy = -4; dy <= 4; dy += 2) {
+        for (let x = 40; x < width - 40; x++) {
+            // Sample a 7px vertical strip around each row's center
+            for (let dy = -3; dy <= 3; dy += 2) {
                 const i = ((y + dy) * width + x) * 4;
                 if (i < 0 || i >= data.length) continue;
                 if (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 < inkThreshold) {
@@ -307,11 +313,15 @@ function detectGridOnImage(imageData) {
     });
 
     const sortedV = [...vProfile].sort((a, b) => a - b);
-    const vThreshold = Math.max(validRows.length * 0.5, sortedV[Math.floor(sortedV.length * 0.75)]);
+    // V-Threshold: at least 40% of rows must have ink at this X 
+    const vThreshold = Math.max(validRows.length * 0.4, sortedV[Math.floor(sortedV.length * 0.75)]);
+    // DENSITY CAP: Avoid picking up thick vertical lines (e.g. table borders)
+    const vDensityCap = validRows.length * 4.5;
+
     const allCols = [];
     let lastX = -50;
-    for (let x = 30; x < width - 30; x++) {
-        if (vProfile[x] > vThreshold && vProfile[x] >= vProfile[x - 1] && vProfile[x] >= vProfile[x + 1] && x - lastX > 25) {
+    for (let x = 40; x < width - 40; x++) {
+        if (vProfile[x] > vThreshold && vProfile[x] < vDensityCap && vProfile[x] >= vProfile[x - 1] && vProfile[x] >= vProfile[x + 1] && x - lastX > 25) {
             allCols.push({ x, strength: vProfile[x] });
             lastX = x;
         }
@@ -347,9 +357,9 @@ function detectGridOnImage(imageData) {
     const expandedRows = [];
     validRows.forEach((row, rowIdx) => {
         blocks.forEach((block, bIdx) => {
-            // Heuristic to detect if first col is a question number vs Option A
+            // Heuristic: if block has 5+ cols and first gap is substantial, it's a Q-Num
             const firstGap = block.length > 1 ? (block[1].x - block[0].x) : 0;
-            const hasNum = block.length >= 5 && firstGap > medianGapVal * 1.35;
+            const hasNum = block.length >= 5 && firstGap > medianGapVal * 1.25;
             const optionCols = block.filter((_, ci) => !(hasNum && ci === 0));
             const blockCols = optionCols.map((c, ci) => ({
                 ...c,
