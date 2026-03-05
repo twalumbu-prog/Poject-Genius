@@ -385,10 +385,42 @@ export default function MarkTest() {
                     const regResponse = await regPromise;
                     regWorker.terminate();
 
+                    let finalImageBitmap;
+                    let aiBase64 = base64; // Default to original for AI
+                    let finalBase64 = base64; // Fallback to original for UI
+
+                    if (regResponse.page_detected && regResponse.warpedImageData) {
+                        // Stage 0 succeeded. Convert warped ImageData back to ImageBitmap
+                        finalImageBitmap = await createImageBitmap(regResponse.warpedImageData);
+
+                        // Convert warped image to Base64 for the VLM Edge Function fallback and UI display
+                        const MAX_VLM_HEIGHT = 2000;
+                        const scale = Math.min(1.0, MAX_VLM_HEIGHT / regResponse.warpedImageData.height);
+
+                        const tempCanvas = document.createElement('canvas');
+                        tempCanvas.width = Math.round(regResponse.warpedImageData.width * scale);
+                        tempCanvas.height = Math.round(regResponse.warpedImageData.height * scale);
+
+                        const tempCtx = tempCanvas.getContext('2d');
+                        if (scale < 1.0) {
+                            const tmpBmp = await createImageBitmap(regResponse.warpedImageData);
+                            tempCtx.drawImage(tmpBmp, 0, 0, tempCanvas.width, tempCanvas.height);
+                            tmpBmp.close();
+                        } else {
+                            tempCtx.putImageData(regResponse.warpedImageData, 0, 0);
+                        }
+                        finalBase64 = tempCanvas.toDataURL('image/jpeg', 0.82);
+                        aiBase64 = finalBase64; // Use rotated version for AI too
+                    } else {
+                        const freshBlob = base64ToBlob(base64);
+                        finalImageBitmap = await createImageBitmap(freshBlob);
+                    }
+
                     // --- BREAKPOINT 1: REGISTRATION ---
+                    // Note: We move this here to show the ROTATED image (finalBase64) to the user
                     await awaitApproval(1, {
                         title: 'Stage 1: Page Registration',
-                        image: base64,
+                        image: finalBase64,
                         metadata: regResponse,
                         checklist: [
                             { label: 'Anchors Found', status: regResponse.page_detected ? 'pass' : 'fail' },
@@ -402,55 +434,24 @@ export default function MarkTest() {
                         ]
                     });
 
-                    let finalImageBitmap;
-                    let aiBase64 = base64; // Default to original for AI
-                    let finalBase64 = base64; // Fallback to original for UI
+                    // --- STAGE 0.7: PREPARE AI IMAGE (RAW VISION FALLBACK) ---
+                    // If registration failed, we still need an AI-friendly image
+                    if (aiBase64 === base64) {
+                        try {
+                            const MAX_AI_SIZE = 2048;
+                            const aiCanvas = document.createElement('canvas');
+                            const aiCtx = aiCanvas.getContext('2d');
+                            const img = new Image();
+                            await new Promise((res) => { img.onload = res; img.src = base64; });
 
-                    if (regResponse.page_detected && regResponse.warpedImageData) {
-                        // Stage 0 succeeded. Convert warped ImageData back to ImageBitmap
-                        finalImageBitmap = await createImageBitmap(regResponse.warpedImageData);
-
-                        // Convert warped image to Base64 for the VLM Edge Function fallback
-                        const MAX_VLM_HEIGHT = 2000;
-                        const scale = Math.min(1.0, MAX_VLM_HEIGHT / regResponse.warpedImageData.height);
-
-                        const tempCanvas = document.createElement('canvas');
-                        tempCanvas.width = Math.round(regResponse.warpedImageData.width * scale);
-                        tempCanvas.height = Math.round(regResponse.warpedImageData.height * scale);
-
-                        const tempCtx = tempCanvas.getContext('2d');
-                        if (scale < 1.0) {
-                            // High-quality downsampling: create temporary bitmap then draw with scaling
-                            const tmpBmp = await createImageBitmap(regResponse.warpedImageData);
-                            tempCtx.drawImage(tmpBmp, 0, 0, tempCanvas.width, tempCanvas.height);
-                            tmpBmp.close();
-                        } else {
-                            tempCtx.putImageData(regResponse.warpedImageData, 0, 0);
+                            const aiScale = Math.min(1.0, MAX_AI_SIZE / Math.max(img.width, img.height));
+                            aiCanvas.width = img.width * aiScale;
+                            aiCanvas.height = img.height * aiScale;
+                            aiCtx.drawImage(img, 0, 0, aiCanvas.width, aiCanvas.height);
+                            aiBase64 = aiCanvas.toDataURL('image/jpeg', 0.85);
+                        } catch (aiErr) {
+                            console.error('[AI Vision] Failed to resize raw image:', aiErr);
                         }
-                        finalBase64 = tempCanvas.toDataURL('image/jpeg', 0.82);
-                    } else {
-                        // Registration failed or low confidence, recreate bitmap from original
-                        const freshBlob = base64ToBlob(base64);
-                        finalImageBitmap = await createImageBitmap(freshBlob);
-                    }
-
-                    // --- STAGE 0.7: PREPARE AI IMAGE (RAW VISION) ---
-                    // Even if registration succeeded, we send the original (raw) resized image to AI
-                    // because AI internal models handle perspective better than machine warping.
-                    try {
-                        const MAX_AI_SIZE = 2048;
-                        const aiCanvas = document.createElement('canvas');
-                        const aiCtx = aiCanvas.getContext('2d');
-                        const img = new Image();
-                        await new Promise((res) => { img.onload = res; img.src = base64; });
-
-                        const aiScale = Math.min(1.0, MAX_AI_SIZE / Math.max(img.width, img.height));
-                        aiCanvas.width = img.width * aiScale;
-                        aiCanvas.height = img.height * aiScale;
-                        aiCtx.drawImage(img, 0, 0, aiCanvas.width, aiCanvas.height);
-                        aiBase64 = aiCanvas.toDataURL('image/jpeg', 0.85);
-                    } catch (aiErr) {
-                        console.error('[AI Vision] Failed to resize raw image:', aiErr);
                     }
 
                     const page_confidence = regResponse.page_confidence || 0;
