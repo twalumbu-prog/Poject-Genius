@@ -420,29 +420,22 @@ function detectGridOnImage(imageData) {
     clampedBlocks.forEach((block, blockIdx) => {
         const hasNum = block.length === 5;
         const optionCols = block.filter((_, i) => !(hasNum && i === 0));
-        // ── EVEN SPACING ENFORCEMENT ──
-        // Raw vertical projection peaks may not land on actual bubble centres.
-        // Re-derive column x positions with strictly even spacing from the block's
-        // median x, which is more robust than trusting every raw peak individually.
+        // Compute colPitch from median inter-column gap (for patch sizing)
         const rawXs = optionCols.map(c => c.x);
         const gaps = [];
         for (let i = 1; i < rawXs.length; i++) gaps.push(rawXs[i] - rawXs[i - 1]);
         const gapsSorted = [...gaps].sort((a, b) => a - b);
-        const medianGapLocal = gapsSorted[Math.floor(gapsSorted.length / 2)] || 30;
-        const colPitch = medianGapLocal; // Use median gap as the canonical pitch
+        const colPitch = gapsSorted[Math.floor(gapsSorted.length / 2)] || 30;
 
-        // Anchor from first raw peak; space the rest evenly
-        const anchorX = rawXs[0];
-        const evenXs = optionCols.map((_, i) => Math.round(anchorX + i * colPitch));
-
-        console.log(`[OPR Grid] Block ${blockIdx} raw x=[${rawXs}] → even x=[${evenXs}] pitch=${Math.round(colPitch)}`);
+        console.log(`[OPR Grid] Block ${blockIdx} x=[${rawXs}] pitch=${Math.round(colPitch)}`);
 
         const blockCols = optionCols.map((c, i) => ({
             ...c,
-            x: evenXs[i],   // ← corrected from raw peak to evenly-spaced centre
+            // Use raw detected x position — even-spacing showed worse results
             label: String.fromCharCode(65 + i),
-            colPitch  // Pass column spacing downstream
+            colPitch
         }));
+
 
 
         rows.forEach((row, rowIdx) => {

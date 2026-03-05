@@ -20,8 +20,12 @@ export function detectCandidates(warpedImageData, gridModel) {
         const rowPitch = row.pitch || 40; // from geometryEngine
 
         cols.forEach(col => {
-            const centerX = col.x;
-            const centerY = row.y;
+            // -- LOCAL CENTERING (Snap-to-darkest) --
+            // The grid might be slightly off. We look in a small radius (±8px) 
+            // for the darkest point and center there.
+            const refined = findLocalDarkest(data, width, height, col.x, row.y, 8);
+            const centerX = refined.x;
+            const centerY = refined.y;
 
             // Adaptive patch: use half the tighter of row-pitch or column-pitch
             // Clamped between 12 (minimum useful) and 28 (max before overlap risk)
@@ -40,7 +44,9 @@ export function detectCandidates(warpedImageData, gridModel) {
                 label: col.label,
                 x: centerX,
                 y: centerY,
-                patchSize, // expose for debugging
+                origX: col.x, // keep for debug
+                origY: row.y, // keep for debug
+                patchSize,
                 stats
             });
         });
@@ -48,6 +54,46 @@ export function detectCandidates(warpedImageData, gridModel) {
 
     return candidates;
 }
+
+/**
+ * Finds the darkest local point in a search radius.
+ * Helps bubbles "snap" to the actual filled circle if the grid is slightly misaligned.
+ */
+function findLocalDarkest(data, w, h, cx, cy, radius) {
+    let minLuma = 255;
+    let bestX = cx;
+    let bestY = cy;
+
+    // We don't check EVERY pixel, just a sparse grid within the radius
+    for (let dy = -radius; dy <= radius; dy += 2) {
+        for (let dx = -radius; dx <= radius; dx += 2) {
+            const tx = Math.round(cx + dx);
+            const ty = Math.round(cy + dy);
+            if (tx < 0 || tx >= w || ty < 0 || ty >= h) continue;
+
+            // Sample a tiny 3x3 window mean at this shift
+            let sum = 0;
+            let count = 0;
+            for (let sy = -1; sy <= 1; sy++) {
+                for (let sx = -1; sx <= 1; sx++) {
+                    const idx = ((ty + sy) * w + (tx + sx)) * 4;
+                    if (idx >= 0 && idx < data.length) {
+                        sum += data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
+                        count++;
+                    }
+                }
+            }
+            const mean = sum / count;
+            if (mean < minLuma) {
+                minLuma = mean;
+                bestX = tx;
+                bestY = ty;
+            }
+        }
+    }
+    return { x: bestX, y: bestY };
+}
+
 
 
 export function classifyStates(candidates) {
