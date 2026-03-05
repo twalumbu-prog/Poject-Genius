@@ -392,8 +392,13 @@ export default function MarkTest() {
                         metadata: regResponse,
                         checklist: [
                             { label: 'Anchors Found', status: regResponse.page_detected ? 'pass' : 'fail' },
-                            { label: 'Orientation Confidence', status: regResponse.page_confidence > 0.5 ? 'pass' : 'warn' },
-                            { label: 'Rotation Applied', status: regResponse.rotation !== 0 ? 'info' : 'pass' }
+                            { label: 'Warp Confidence', status: regResponse.page_confidence > 0.5 ? 'pass' : 'warn' },
+                            ...(regResponse.orientation_scores ? [
+                                { label: `Orientation Multi-Signal (Conf: ${(regResponse.orientation_confidence * 100).toFixed(1)}%)`, status: regResponse.orientation_confidence >= 0.35 ? 'pass' : 'warn' },
+                                { label: `Rotation Applied: ${regResponse.rotation_applied}°`, status: 'info' }
+                            ] : [
+                                { label: 'Orientation (Legacy)', status: 'info' }
+                            ])
                         ]
                     });
 

@@ -1,5 +1,7 @@
 /* src/workers/pageRegistrationWorker.js */
+import { evaluateOrientationV2 } from './oprPipeline/orientationEngineV2.js';
 
+const USE_ORIENTATION_V2 = true;
 self.onmessage = async (e) => {
     if (e.data.type === 'PROCESS_PAGE') {
         const { imageBitmap } = e.data;
@@ -87,7 +89,25 @@ function processPage(imageBitmap) {
         const warpedImageData = warpPerspective(fullImgData, originalQuad, targetW, targetH);
 
         // --- Stage 0.5: Orientation Correction ---
-        const correctedImageData = detectAndFixRotation(warpedImageData);
+        let correctedImageData;
+        let orientationMetrics = {};
+
+        if (USE_ORIENTATION_V2) {
+            const v2Result = evaluateOrientationV2(warpedImageData);
+            correctedImageData = v2Result.correctedImage;
+            orientationMetrics = {
+                rotation_applied: v2Result.rotationApplied,
+                orientation_confidence: v2Result.orientationConfidence,
+                orientation_scores: v2Result.orientationScores
+            };
+            if (v2Result.orientationConfidence < 0.35) {
+                console.warn("[Orientation V2] LOW_ORIENTATION_CONFIDENCE flagged.");
+                orientationMetrics.warning = "LOW_ORIENTATION_CONFIDENCE";
+            }
+        } else {
+            correctedImageData = detectAndFixRotation(warpedImageData);
+            orientationMetrics = { legacy_orientation: true };
+        }
 
         const t1 = performance.now();
         return {
@@ -97,7 +117,8 @@ function processPage(imageBitmap) {
             is_blurry: isBlurry,
             quad_points: originalQuad,
             warpedImageData: correctedImageData,
-            processingTimeMs: Math.round(t1 - t0)
+            processingTimeMs: Math.round(t1 - t0),
+            ...orientationMetrics
         };
     } else {
         console.warn("[Stage 0] No high-confidence page bounds found. Bypassing warp.");
