@@ -51,18 +51,21 @@ export function detectCandidates(warpedImageData, gridModel) {
 
 
 export function classifyStates(candidates) {
-    // 1. Compute global "paper" baseline from empty-looking patches
+    // 1. Compute global "paper" baseline from the BRIGHTEST patches
+    // (75th percentile means most patches are paper = unfilled)
     const baselineIntensities = candidates.map(c => c.stats.mean).sort((a, b) => a - b);
-    const paperWhite = baselineIntensities[Math.floor(baselineIntensities.length * 0.75)]; // 75th percentile is paper
-    console.log(`[OPR Classification] Detected Paper Baseline: ${Math.round(paperWhite)}`);
+    const paperWhite = baselineIntensities[Math.floor(baselineIntensities.length * 0.75)];
+    console.log(`[OPR Classification] Paper baseline: ${Math.round(paperWhite)}`);
 
-    // 2. Compute adaptive thresholds
-    const filledDelta = 65; // Minimum darkness delta from paper to be "filled"
-    const erasureDelta = 35; // Minimum darkness delta to be "erasure"
+    // 2. Adaptive thresholds
+    const filledDelta = 55;   // darkness delta from paper → filled (lowered from 65: smaller patch = less dilution)
+    const erasureDelta = 30;  // darkness delta → erasure suspect
 
     return candidates.map(c => {
+        const ps = c.patchSize || 30;  // use actual patch size used for this candidate
+        const patchArea = ps * ps;
         const delta = paperWhite - c.stats.mean;
-        const fillRatio = c.stats.darkPixels / (30 * 30);
+        const fillRatio = c.stats.darkPixels / patchArea;  // ← CRITICAL FIX: was hardcoded 30*30
 
         let state = 'EMPTY';
         let confidence = 0.95;
@@ -85,6 +88,7 @@ export function classifyStates(candidates) {
         };
     });
 }
+
 
 function analyzePatch(data, w, h, cx, cy, size, darkThreshold = 140) {
     let sum = 0;
