@@ -62,9 +62,10 @@ self.onmessage = async (e) => {
 
             // -- STAGE 2: Question Number Remapping (multi-block) --
             const numBlocks = geometry.layoutResult.blocks || 1;
-            if (numBlocks > 1 && markingSchemeCount) {
-                const questionsPerBlock = Math.ceil(markingSchemeCount / numBlocks);
-                console.log(`[OPR Remap] ${numBlocks} blocks, totalQ=${markingSchemeCount}, questionsPerBlock=${questionsPerBlock}`);
+            if (markingSchemeCount) {
+                // ECZ sheets usually have 20 questions per column
+                const QUESTIONS_PER_BLOCK = 20;
+                console.log(`[OPR Remap] ${numBlocks} blocks, totalQ=${markingSchemeCount}, capacityPerBlock=${QUESTIONS_PER_BLOCK}`);
 
                 // Group rows by blockIdx and sort them by Y coordinate
                 const blockGroups = {};
@@ -77,25 +78,30 @@ self.onmessage = async (e) => {
                 const finalRows = [];
                 Object.keys(blockGroups).sort().forEach(bKey => {
                     const bIdx = parseInt(bKey);
+                    // Standard ECZ mapping: Block 0 = Q1-20, Block 1 = Q21-40, etc.
+                    const blockStartNum = bIdx * QUESTIONS_PER_BLOCK;
+
                     const rowsInBlock = blockGroups[bKey].sort((a, b) => a.y - b.y);
 
-                    // Only take the first questionsPerBlock rows for this block
-                    const usedRows = rowsInBlock.slice(0, questionsPerBlock);
-                    usedRows.forEach((row, rowIndex) => {
-                        row.question_number = bIdx * questionsPerBlock + rowIndex + 1;
+                    rowsInBlock.forEach((row, rowIndex) => {
+                        const qNum = blockStartNum + rowIndex + 1;
 
-                        // Debug log
-                        const cols = row.columns || [];
-                        const xPos = cols.map(c => `${c.label}@${c.x}`).join(',');
-                        console.log(`[OPR Remap] Q${row.question_number} (Block ${bIdx}) → y=${row.y} x=[${xPos}]`);
-
-                        finalRows.push(row);
+                        // Only keep if within the marking scheme range
+                        if (qNum <= markingSchemeCount) {
+                            row.question_number = qNum;
+                            // Debug log
+                            const cols = row.columns || [];
+                            const xPos = cols.map(c => `${c.label}@${c.x}`).join(',');
+                            console.log(`[OPR Remap] Q${row.question_number} (Block ${bIdx}) → y=${row.y} x=[${xPos}]`);
+                            finalRows.push(row);
+                        }
                     });
                 });
 
                 geometry.gridModel.rows = finalRows;
-                console.log(`[OPR Remap] After filter: ${geometry.gridModel.rows.length} rows kept (expected ${markingSchemeCount})`);
+                console.log(`[OPR Remap] After filter: ${geometry.gridModel.rows.length} rows kept (expected <= ${markingSchemeCount})`);
             }
+
 
 
 

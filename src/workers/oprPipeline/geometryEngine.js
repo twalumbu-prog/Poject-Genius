@@ -258,9 +258,10 @@ function detectGridOnImage(imageData) {
     // -- STEP B: VERTICAL PROFILE (Find Column Blocks First) --
     // Sum ink vertically across the whole image
     const verticalProfile = new Float32Array(width);
+    // TRUNCATION: Skip top 50 and bottom 250 (avoid QR codes/headers)
     for (let x = 0; x < width; x++) {
         let inkCount = 0;
-        for (let y = 50; y < height - 50; y += 2) {
+        for (let y = 50; y < height - 250; y += 2) {
             const i = (y * width + x) * 4;
             if (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 < inkThreshold) inkCount++;
         }
@@ -284,13 +285,21 @@ function detectGridOnImage(imageData) {
 
     if (allCols.length < 4) return { rows: [], cols: [], blocks: 0, score: 0 };
 
-    // Group into Blocks (e.g. 2 groups of 4-5 bubbles)
+    // -- DYNAMIC BLOCK BOUNDARY --
+    const gaps = [];
+    for (let i = 1; i < allCols.length; i++) {
+        gaps.push(allCols[i].x - allCols[i - 1].x);
+    }
+    const sortedGaps = [...gaps].sort((a, b) => a - b);
+    const medianGapVal = sortedGaps[Math.floor(sortedGaps.length / 2)];
+    // Block boundary: Large gap = new block. Median * 2.5 is usually safe.
+    const blockBoundary = medianGapVal * 2.5;
+
     const blocks = [];
     let currentBlock = [allCols[0]];
-    const blockGapThreshold = 100; // Large gap = new block
     for (let i = 1; i < allCols.length; i++) {
         const gap = allCols[i].x - allCols[i - 1].x;
-        if (gap > blockGapThreshold) {
+        if (gap > blockBoundary) {
             if (currentBlock.length >= 4) blocks.push(currentBlock);
             currentBlock = [allCols[i]];
         } else {
@@ -298,13 +307,30 @@ function detectGridOnImage(imageData) {
         }
     }
     if (currentBlock.length >= 4) blocks.push(currentBlock);
-    console.log(`[OPR Grid] Found ${blocks.length} column blocks.`);
+
+    // -- CAP COLUMNS --
+    // Prune noise: only keep the best 6 columns (Num + A-E) if extra peaks were found
+    const clampedBlocks = blocks.map(block => {
+        if (block.length <= 6) return block;
+        return [...block].sort((a, b) => b.strength - a.strength).slice(0, 6).sort((a, b) => a.x - b.x);
+    });
+
+    console.log(`[OPR Grid] Found ${clampedBlocks.length} blocks with adaptive boundary ${Math.round(blockBoundary)}px`);
 
     // -- STEP C: PER-BLOCK ROW DETECTION --
     const expandedRows = [];
     let grandScore = 0;
 
-    blocks.forEach((block, blockIdx) => {
+    clampedBlocks.forEach((block, blockIdx) => {
+        // Prepare columns for this block (remap to A, B, C, D)
+        // Heuristic: If 5 or more columns, the first one is likely the question number label
+        const hasNum = block.length >= 5;
+        const optionCols = block.filter((_, i) => !(hasNum && i === 0));
+        const colPitch = optionCols.length > 1 ? (optionCols[optionCols.length - 1].x - optionCols[0].x) / (optionCols.length - 1) : 30;
+        const blockCols = optionCols.map((c, i) => ({
+            ...c, label: String.fromCharCode(65 + i), colPitch
+        }));
+
         // Define X-range for this block with some padding
         const minX = Math.max(0, block[0].x - 20);
         const maxX = Math.min(width - 1, block[block.length - 1].x + 20);
@@ -351,14 +377,6 @@ function detectGridOnImage(imageData) {
             }
         }
 
-        // Prepare columns for this block (remap to A, B, C, D)
-        const hasNum = block.length === 5;
-        const optionCols = block.filter((_, i) => !(hasNum && i === 0));
-        const colPitch = optionCols.length > 1 ? (optionCols[optionCols.length - 1].x - optionCols[0].x) / (optionCols.length - 1) : 30;
-        const blockCols = optionCols.map((c, i) => ({
-            ...c, label: String.fromCharCode(65 + i), colPitch
-        }));
-
         console.log(`[OPR Grid] Block ${blockIdx}: ${blockRows.length} rows found at x=[${minX}-${maxX}]`);
 
         // Assemble rows for this block
@@ -377,15 +395,16 @@ function detectGridOnImage(imageData) {
         grandScore += blockRows.length;
     });
 
-    const cols = blocks[0].map((c, i) => ({ ...c, label: String.fromCharCode(65 + i) }));
+    const cols = clampedBlocks[0].map((c, i) => ({ ...c, label: String.fromCharCode(65 + i) }));
 
     return {
         rows: expandedRows,
         cols,
-        blocks: blocks.length,
+        blocks: clampedBlocks.length,
         score: grandScore
     };
 }
+
 
 
 function discoverGridRobust(imageData) {
