@@ -462,49 +462,64 @@ function detectAndFixRotation(imageData) {
     const cw = width;
     const ch = height;
 
-    // Fast density check of the 4 outer margins (15% thickness)
+    // Fast Edge Density check of the 4 outer margins (15% thickness)
+    // We use a simple gradient magnitude (edge detection) rather than absolute
+    // pixel brightness. This makes the heuristic immune to heavy shadows
+    // which trick simple thresholding into thinking a shadow is a printed header.
     const marginY = Math.floor(ch * 0.15);
     const marginX = Math.floor(cw * 0.15);
 
-    let topInk = 0, bottomInk = 0, leftInk = 0, rightInk = 0;
+    let topEdges = 0, bottomEdges = 0, leftEdges = 0, rightEdges = 0;
 
     // We only sample every 4th pixel for phenomenal speed
     const step = 4;
+    const thresh = 25; // Minimum brightness difference to count as an edge
+
+    // Helper to get rough grayscale of a pixel index
+    const getLuma = (idx) => data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
 
     // Top
-    for (let y = 0; y < marginY; y += step) {
-        for (let x = 0; x < cw; x += step) {
+    for (let y = 0; y < marginY - step; y += step) {
+        for (let x = 0; x < cw - step; x += step) {
             const i = (y * cw + x) * 4;
-            if (data[i] < 128) topInk++; // Dark pixel
+            const p = getLuma(i);
+            const px = getLuma(i + step * 4);
+            if (Math.abs(p - px) > thresh) topEdges++;
         }
     }
     // Bottom
-    for (let y = ch - marginY; y < ch; y += step) {
-        for (let x = 0; x < cw; x += step) {
+    for (let y = ch - marginY; y < ch - step; y += step) {
+        for (let x = 0; x < cw - step; x += step) {
             const i = (y * cw + x) * 4;
-            if (data[i] < 128) bottomInk++;
+            const p = getLuma(i);
+            const px = getLuma(i + step * 4);
+            if (Math.abs(p - px) > thresh) bottomEdges++;
         }
     }
     // Left
-    for (let x = 0; x < marginX; x += step) {
-        for (let y = 0; y < ch; y += step) {
+    for (let x = 0; x < marginX - step; x += step) {
+        for (let y = 0; y < ch - step; y += step) {
             const i = (y * cw + x) * 4;
-            if (data[i] < 128) leftInk++;
+            const p = getLuma(i);
+            const py = getLuma(i + cw * step * 4);
+            if (Math.abs(p - py) > thresh) leftEdges++;
         }
     }
     // Right
-    for (let x = cw - marginX; x < cw; x += step) {
-        for (let y = 0; y < ch; y += step) {
+    for (let x = cw - marginX; x < cw - step; x += step) {
+        for (let y = 0; y < ch - step; y += step) {
             const i = (y * cw + x) * 4;
-            if (data[i] < 128) rightInk++;
+            const p = getLuma(i);
+            const py = getLuma(i + cw * step * 4);
+            if (Math.abs(p - py) > thresh) rightEdges++;
         }
     }
 
     // Densities scaled to be comparable regardless of horizontal vs vertical margins
-    const topDensity = topInk / ((cw / step) * (marginY / step));
-    const botDensity = bottomInk / ((cw / step) * (marginY / step));
-    const leftDensity = leftInk / ((ch / step) * (marginX / step));
-    const rightDensity = rightInk / ((ch / step) * (marginX / step));
+    const topDensity = topEdges / ((cw / step) * (marginY / step));
+    const botDensity = bottomEdges / ((cw / step) * (marginY / step));
+    const leftDensity = leftEdges / ((ch / step) * (marginX / step));
+    const rightDensity = rightEdges / ((ch / step) * (marginX / step));
 
     console.log(`[Orientation] Edge densities - Top:${topDensity.toFixed(3)}, Bot:${botDensity.toFixed(3)}, L:${leftDensity.toFixed(3)}, R:${rightDensity.toFixed(3)}`);
 
@@ -512,17 +527,17 @@ function detectAndFixRotation(imageData) {
 
     let workingData = imageData;
 
-    // If the heaviest ink edge is not the top, rotate so it becomes the top.
-    // The "Header" of an OMR form (Logo, Title, Instructions) is always the densest edge.
-    if (maxDensity === leftDensity && leftDensity > Math.max(topDensity, rightDensity) * 1.2) {
+    // If the heaviest edge is not the top, rotate so it becomes the top.
+    // The "Header" of an OMR form (Logo, Title, Instructions) is always the most edge-dense region.
+    if (maxDensity === leftDensity && leftDensity > Math.max(topDensity, rightDensity) * 1.1) {
         console.warn("[Orientation] Header is on the LEFT. Rotating +90° CW to make upright.");
         workingData = rotateImageData(workingData, 90);
     }
-    else if (maxDensity === rightDensity && rightDensity > Math.max(topDensity, leftDensity) * 1.2) {
+    else if (maxDensity === rightDensity && rightDensity > Math.max(topDensity, leftDensity) * 1.1) {
         console.warn("[Orientation] Header is on the RIGHT. Rotating 270° CW to make upright.");
         workingData = rotateImageData(workingData, 270);
     }
-    else if (maxDensity === botDensity && botDensity > topDensity * 1.5) {
+    else if (maxDensity === botDensity && botDensity > topDensity * 1.2) {
         console.warn("[Orientation] Header is on the BOTTOM. Rotating 180° to make upright.");
         workingData = rotateImageData(workingData, 180);
     }
