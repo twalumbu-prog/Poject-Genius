@@ -49,7 +49,7 @@ export function decideRows(classifiedBubbles, totalQuestions) {
 
         // ── DECISION THRESHOLDS (tunable) ──
         const MIN_ROW_DELTA = 20;    // darkest must be >=20 luma darker than row's own paper
-        const MIN_MARGIN = 8;        // must stand out >=8 luma from the next option
+        const MIN_MARGIN = 5;        // must stand out >=5 luma from next option (lowered from 8)
         const MIN_FILL_RATIO = 0.20; // at least 20% of the patch must be "ink"
 
         // Check global pre-classified states for cross-validation

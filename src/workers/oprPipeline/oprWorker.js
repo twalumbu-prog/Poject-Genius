@@ -68,14 +68,26 @@ self.onmessage = async (e) => {
 
                 console.log(`[OPR Remap] ${numBlocks} blocks, totalQ=${markingSchemeCount}, questionsPerBlock=${questionsPerBlock}, rowsPerBlock=${totalRowsPerBlock}`);
 
-                geometry.gridModel.rows.forEach(row => {
-                    // Original blockIdx and rowIdx within that block
+                // FILTER: only keep the first questionsPerBlock rows from each block.
+                // Then remap their question_number correctly.
+                geometry.gridModel.rows = geometry.gridModel.rows.filter(row => {
+                    const origRowInBlock = (row.question_number - 1) % totalRowsPerBlock;
+                    return origRowInBlock < questionsPerBlock; // discard overflow rows
+                }).map(row => {
                     const origBlockIdx = Math.floor((row.question_number - 1) / totalRowsPerBlock);
                     const origRowInBlock = (row.question_number - 1) % totalRowsPerBlock;
-                    // Re-map: only use first questionsPerBlock rows per block
                     row.question_number = origBlockIdx * questionsPerBlock + origRowInBlock + 1;
+
+                    // Debug: log each kept row's x/y positions
+                    const cols = row.columns || [];
+                    const xPositions = cols.map(c => `${c.label}@${c.x}`).join(',');
+                    console.log(`[OPR Remap] Q${row.question_number} → y=${row.y} cols=[${xPositions}]`);
+                    return row;
                 });
+
+                console.log(`[OPR Remap] After filter: ${geometry.gridModel.rows.length} rows kept (expected ${markingSchemeCount})`);
             }
+
 
             // -- STAGE 2b: Bubble Candidate Detection --
             console.log('[OPR] Stage 2: Candidate Detection...');
