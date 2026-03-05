@@ -245,16 +245,23 @@ function discoverGridRobust(imageData) {
 
     if (rows.length === 0) return { rows: [], cols: [] };
 
-    // 2. Vertical Profile across the image
+    // 2. Vertical Profile across the image (sampled across detected rows)
     const verticalProfile = new Float32Array(width);
+    const vWindow = 10; // Sample +/- 10 pixels to handle tilt
     for (let x = 0; x < width; x++) {
         let colSum = 0;
+        let samples = 0;
         for (const row of rows) {
-            const i = (row.y * width + x) * 4;
-            const l = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-            colSum += (255 - l);
+            for (let dy = -vWindow; dy <= vWindow; dy++) {
+                const targetY = row.y + dy;
+                if (targetY < 0 || targetY >= height) continue;
+                const i = (targetY * width + x) * 4;
+                const l = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+                colSum += (255 - l);
+                samples++;
+            }
         }
-        verticalProfile[x] = colSum / rows.length;
+        verticalProfile[x] = colSum / (samples || 1);
     }
 
     // 3. Detect ALL Column Peaks
@@ -279,7 +286,7 @@ function discoverGridRobust(imageData) {
             currentBlock.push(col);
         } else {
             const prevCol = currentBlock[currentBlock.length - 1];
-            if (col.x - prevCol.x < 150) { // Same block
+            if (col.x - prevCol.x < 120) { // Same block (tighter threshold)
                 currentBlock.push(col);
             } else { // New block
                 if (currentBlock.length >= 4) blocks.push(currentBlock);

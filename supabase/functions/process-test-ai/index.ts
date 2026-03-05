@@ -6,8 +6,10 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
 const GEMINI_MODELS = [
-  "gemini-2.0-flash",
+  "gemini-2.0-flash-exp",
+  "gemini-1.5-flash-latest",
   "gemini-1.5-flash",
+  "gemini-1.5-pro-latest",
   "gemini-1.5-pro",
 ];
 
@@ -144,7 +146,9 @@ async function callGemini(messages: any[], apiKey: string) {
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
       if (resp.status === 429) throw { isQuotaError: true, retryAfter: 15, message: "Quota exceeded" };
-      if (resp.status === 404 || resp.status === 400) { lastError = new Error(`Model ${model} unavailable`); continue; }
+      if (resp.status === 404) { lastError = new Error(`Model ${model} not found (404)`); continue; }
+      if (resp.status === 400) { lastError = new Error(`Bad Request for ${model} (400) - check formatting`); continue; }
+      if (resp.status === 403 || resp.status === 401) throw new Error(`API Key error (${resp.status}): ${JSON.stringify(err)}`);
       throw new Error(`Gemini ${resp.status}: ${JSON.stringify(err)}`);
     }
     const result = await resp.json();
