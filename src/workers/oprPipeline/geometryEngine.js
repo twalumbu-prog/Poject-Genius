@@ -36,11 +36,12 @@ export function extractGeometry(imageData) {
         warpedImageData,
         gridModel,
         layoutResult: {
+            blocks: gridModel.blocks || 1,
             regions: gridModel.rows.map(row => ({
                 question_number: row.question_number,
                 y: row.y,
                 h: row.h,
-                columns: gridModel.cols
+                columns: row.columns || gridModel.cols
             }))
         }
     };
@@ -216,76 +217,110 @@ function solve(A, b) {
     return x;
 }
 
-function discoverGridRobust(imageData) {
+/**
+ * Rotate raw ImageData 90° clockwise and return new ImageData.
+ */
+function rotateImageData90CW(imageData) {
+    const { width, height, data } = imageData;
+    const newData = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const si = (y * width + x) * 4;
+            const nx = height - 1 - y;
+            const ny = x;
+            const di = (ny * height + nx) * 4;
+            newData[di] = data[si];
+            newData[di + 1] = data[si + 1];
+            newData[di + 2] = data[si + 2];
+            newData[di + 3] = data[si + 3];
+        }
+    }
+    return new ImageData(newData, height, width);
+}
+
+/**
+ * Core grid detection: horizontal + vertical projection on a given ImageData.
+ * Returns { rows, cols, blocks, score } — score = rows.length (0 = failure).
+ */
+function detectGridOnImage(imageData) {
     const { width, height, data } = imageData;
 
-    // ══ 1. HORIZONTAL PROJECTION PROFILE ══
+    // ── STEP A: COMPUTE IMAGE BRIGHTNESS STATS FOR ADAPTIVE THRESHOLDING ──
+    let totalLuma = 0;
+    const STEP = 4; // Sample every 4th pixel for speed
+    let count = 0;
+    for (let y = 0; y < height; y += STEP) {
+        for (let x = 0; x < width; x += STEP) {
+            const i = (y * width + x) * 4;
+            totalLuma += data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+            count++;
+        }
+    }
+    const meanLuma = totalLuma / count;
+    // Adaptive: treat pixels darker than (meanLuma - margin) as "ink"
+    const inkThreshold = Math.max(100, meanLuma - 30);
+
+    console.log(`[OPR Grid] Image ${width}x${height}, meanLuma=${Math.round(meanLuma)}, inkThreshold=${Math.round(inkThreshold)}`);
+
+    // ── STEP B: HORIZONTAL PROJECTION (full width) ──
     const horizontalProfile = new Float32Array(height);
     for (let y = 0; y < height; y++) {
-        let rowSum = 0;
+        let inkCount = 0;
         for (let x = 0; x < width; x++) {
             const i = (y * width + x) * 4;
             const l = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-            rowSum += (255 - l);
+            if (l < inkThreshold) inkCount++;
         }
-        horizontalProfile[y] = rowSum / width;
+        horizontalProfile[y] = inkCount;
     }
 
-    // ══ 2. DETECT CANDIDATE ROWS (Raw peaks in profile) ══
+    // ── STEP C: FIND CANDIDATE ROWS (local peaks in ink density) ──
+    // Dynamic threshold: top 30% of profile values
+    const sortedH = [...horizontalProfile].sort((a, b) => a - b);
+    const hThreshold = Math.max(2, sortedH[Math.floor(sortedH.length * 0.70)]);
+
     const candidateRows = [];
-    const hThreshold = 15; // Reduced threshold for sensitivity
     let lastY = -100;
-    for (let y = 80; y < height - 80; y++) {
+    for (let y = 50; y < height - 50; y++) {
         if (horizontalProfile[y] > hThreshold &&
-            horizontalProfile[y] > horizontalProfile[y - 1] &&
-            horizontalProfile[y] > horizontalProfile[y + 1]) {
-            if (y - lastY > 20) {
-                candidateRows.push({ y, h: 40, strength: horizontalProfile[y] });
-                lastY = y;
-            }
+            horizontalProfile[y] >= horizontalProfile[y - 1] &&
+            horizontalProfile[y] >= horizontalProfile[y + 1] &&
+            y - lastY > 15) {
+            candidateRows.push({ y, h: 40, strength: horizontalProfile[y] });
+            lastY = y;
         }
     }
 
-    if (candidateRows.length < 3) return { rows: [], cols: [] };
+    console.log(`[OPR Grid] hThreshold=${Math.round(hThreshold)}, candidateRows=${candidateRows.length}`);
+    if (candidateRows.length < 3) return { rows: [], cols: [], blocks: 0, score: 0 };
 
-    // ══ 3. VALIDATE ROWS — Keep only evenly-spaced rows (filter header artifacts) ══
-    // Real bubble rows form a grid: they are evenly spaced.
-    // Header artifacts are isolated or irregularly spaced.
+    // ── STEP D: SPACING VALIDATION — filter to evenly-spaced rows ──
     const spacings = [];
     for (let i = 1; i < candidateRows.length; i++) {
         spacings.push(candidateRows[i].y - candidateRows[i - 1].y);
     }
-
-    // Find the dominant spacing (most common gap range, i.e., the mode within a 15px tolerance)
     spacings.sort((a, b) => a - b);
     const medianSpacing = spacings[Math.floor(spacings.length / 2)];
+    const SPACING_TOLERANCE = Math.max(12, medianSpacing * 0.45);
 
-    // Keep only rows where the gap to the previous or next row is close to median
-    const SPACING_TOLERANCE = Math.max(15, medianSpacing * 0.4);
     const rows = [];
     for (let i = 0; i < candidateRows.length; i++) {
         const prev = i > 0 ? candidateRows[i].y - candidateRows[i - 1].y : null;
         const next = i < candidateRows.length - 1 ? candidateRows[i + 1].y - candidateRows[i].y : null;
-
         const prevOk = prev === null || Math.abs(prev - medianSpacing) < SPACING_TOLERANCE;
         const nextOk = next === null || Math.abs(next - medianSpacing) < SPACING_TOLERANCE;
-
-        // A row is valid if at least one of its neighbours has consistent spacing
-        if (prevOk || nextOk) {
-            rows.push(candidateRows[i]);
-        }
+        if (prevOk || nextOk) rows.push(candidateRows[i]);
     }
 
-    // Must have at least 5 rows to be a real answer grid
-    if (rows.length < 5) return { rows: [], cols: [] };
+    console.log(`[OPR Grid] spacing validation: ${candidateRows.length} → ${rows.length} valid rows (medianSpacing=${Math.round(medianSpacing)}px)`);
 
-    console.log(`[OPR Grid] Row validation: ${candidateRows.length} candidates → ${rows.length} valid rows (medianSpacing=${Math.round(medianSpacing)}px)`);
+    if (rows.length < 5) return { rows: [], cols: [], blocks: 0, score: 0 };
 
-    // ══ 4. VERTICAL PROFILE (sampled across VALID rows only) ══
+    // ── STEP E: VERTICAL PROFILE (sampled at valid row y-positions only) ──
     const verticalProfile = new Float32Array(width);
-    const vWindow = 12; // Sample +/- 12px to handle tilt
+    const vWindow = 15;
     for (let x = 0; x < width; x++) {
-        let colSum = 0;
+        let inkCount = 0;
         let samples = 0;
         for (const row of rows) {
             for (let dy = -vWindow; dy <= vWindow; dy++) {
@@ -293,53 +328,53 @@ function discoverGridRobust(imageData) {
                 if (targetY < 0 || targetY >= height) continue;
                 const i = (targetY * width + x) * 4;
                 const l = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-                colSum += (255 - l);
+                if (l < inkThreshold) inkCount++;
                 samples++;
             }
         }
-        verticalProfile[x] = colSum / (samples || 1);
+        verticalProfile[x] = samples > 0 ? inkCount / samples * 100 : 0;
     }
 
-    // ══ 5. DETECT ALL COLUMN PEAKS ══
+    // ── STEP F: DETECT COLUMN PEAKS ──
+    // Adaptive: use 70th percentile of vertical profile as threshold
+    const sortedV = [...verticalProfile].sort((a, b) => a - b);
+    const vThreshold = Math.max(1, sortedV[Math.floor(sortedV.length * 0.60)]);
+
     const allCols = [];
-    let lastX = -50;
-    for (let x = 30; x < width - 30; x++) {
-        if (verticalProfile[x] > 10 &&
-            verticalProfile[x] > verticalProfile[x - 1] &&
-            verticalProfile[x] > verticalProfile[x + 1]) {
-            if (x - lastX > 30) { // minimum 30px between peaks
-                allCols.push({ x, w: 40, strength: verticalProfile[x] });
-                lastX = x;
-            }
+    let lastX = -40;
+    for (let x = 20; x < width - 20; x++) {
+        if (verticalProfile[x] > vThreshold &&
+            verticalProfile[x] >= verticalProfile[x - 1] &&
+            verticalProfile[x] >= verticalProfile[x + 1] &&
+            x - lastX > 20) {
+            allCols.push({ x, w: 35, strength: verticalProfile[x] });
+            lastX = x;
         }
     }
 
-    if (allCols.length < 4) return { rows: [], cols: [] };
+    console.log(`[OPR Grid] vThreshold=${vThreshold.toFixed(1)}, allCols=${allCols.length}`);
 
-    // ══ 6. SMART COLUMN BLOCK GROUPING ══
-    // Compute all inter-peak gaps
-    const colGaps = [];
+    if (allCols.length < 4) return { rows: [], cols: [], blocks: 0, score: 0 };
+
+    // ── STEP G: GROUP COLUMN PEAKS INTO BLOCKS ──
+    // Use 85th-percentile gap as the block separator threshold
+    const gaps = [];
     for (let i = 1; i < allCols.length; i++) {
-        colGaps.push({ gap: allCols[i].x - allCols[i - 1].x, afterIdx: i - 1 });
+        gaps.push(allCols[i].x - allCols[i - 1].x);
     }
+    const sortedGaps = [...gaps].sort((a, b) => a - b);
+    const medianGap = sortedGaps[Math.floor(sortedGaps.length / 2)];
+    const p85Gap = sortedGaps[Math.floor(sortedGaps.length * 0.85)] || medianGap;
+    // Block boundary = gap larger than median + 50% of the p85-median range
+    const blockBoundary = medianGap + (p85Gap - medianGap) * 0.5 + 5;
 
-    // Find the median and std of gaps
-    const sortedGaps = [...colGaps].map(g => g.gap).sort((a, b) => a - b);
-    const medianColGap = sortedGaps[Math.floor(sortedGaps.length / 2)];
-    const meanGap = sortedGaps.reduce((a, b) => a + b, 0) / sortedGaps.length;
-
-    // Block boundary = gap that is > 1.8x the median column gap
-    const BLOCK_GAP_RATIO = 1.8;
-    const blockBoundaryThreshold = medianColGap * BLOCK_GAP_RATIO;
-
-    console.log(`[OPR Grid] ${allCols.length} column peaks. medianGap=${Math.round(medianColGap)}, blockThreshold=${Math.round(blockBoundaryThreshold)}`);
+    console.log(`[OPR Grid] medianGap=${Math.round(medianGap)}, p85Gap=${Math.round(p85Gap)}, blockBoundary=${Math.round(blockBoundary)}`);
 
     const blocks = [];
     let currentBlock = [allCols[0]];
     for (let i = 1; i < allCols.length; i++) {
         const gap = allCols[i].x - allCols[i - 1].x;
-        if (gap > blockBoundaryThreshold) {
-            // Only keep blocks with ≥ 4 columns (A, B, C, D minimum)
+        if (gap > blockBoundary) {
             if (currentBlock.length >= 4) blocks.push(currentBlock);
             currentBlock = [allCols[i]];
         } else {
@@ -348,38 +383,30 @@ function discoverGridRobust(imageData) {
     }
     if (currentBlock.length >= 4) blocks.push(currentBlock);
 
-    console.log(`[OPR Grid] Detected ${blocks.length} column blocks.`);
-
-    // If no valid multi-block was found, attempt single-block fallback
+    // Fallback: if no multi-block found, use single block
     if (blocks.length === 0) {
-        console.warn(`[OPR Grid] No valid blocks found. Using all columns as single block.`);
+        console.warn(`[OPR Grid] Block grouping found no 4+ column blocks. Fallback to single block.`);
         blocks.push(allCols);
     }
 
-    // ══ 7. BUILD EXPANDED ROWS WITH CORRECT QUESTION NUMBERS ══
-    // MAX_COLS_PER_BLOCK: ECZ sheets have at most NUM + A,B,C,D = 5 columns per block.
-    // Cap each block to this to prevent A-Z label overflow from noisy peaks.
-    const MAX_COLS_PER_BLOCK = 5;
+    console.log(`[OPR Grid] Detected ${blocks.length} column blocks from ${allCols.length} peaks.`);
 
+    // ── STEP H: CAP COLUMNS AND LABEL ──
+    const MAX_COLS_PER_BLOCK = 5;
     const clampedBlocks = blocks.map(block => {
         if (block.length <= MAX_COLS_PER_BLOCK) return block;
-
-        // Too many detected columns: use only the top-N strongest peaks
-        return [...block]
-            .sort((a, b) => b.strength - a.strength)
-            .slice(0, MAX_COLS_PER_BLOCK)
-            .sort((a, b) => a.x - b.x); // re-sort by x position
+        return [...block].sort((a, b) => b.strength - a.strength).slice(0, MAX_COLS_PER_BLOCK).sort((a, b) => a.x - b.x);
     });
 
+    // ── STEP I: BUILD EXPANDED ROW LIST ──
     const expandedRows = [];
     const questionsPerBlock = rows.length;
 
     clampedBlocks.forEach((block, blockIdx) => {
-        // Label columns: if 5 peaks → [NUM, A, B, C, D]; if 4 peaks → [A, B, C, D]
         const hasNum = block.length === 5;
         const blockCols = block
-            .filter((_, i) => !(hasNum && i === 0)) // remove NUM column (first peak)
-            .map((c, i) => ({ ...c, label: String.fromCharCode(65 + i) })); // A, B, C, D
+            .filter((_, i) => !(hasNum && i === 0))
+            .map((c, i) => ({ ...c, label: String.fromCharCode(65 + i) }));
 
         rows.forEach((row, rowIdx) => {
             expandedRows.push({
@@ -390,13 +417,37 @@ function discoverGridRobust(imageData) {
         });
     });
 
-    return {
-        rows: expandedRows,
-        cols: clampedBlocks[0]
-            ?.filter((_, i) => !(clampedBlocks[0].length === 5 && i === 0))
-            .map((c, i) => ({ ...c, label: String.fromCharCode(65 + i) })) || []
-    };
+    const cols = clampedBlocks[0]
+        ?.filter((_, i) => !(clampedBlocks[0].length === 5 && i === 0))
+        .map((c, i) => ({ ...c, label: String.fromCharCode(65 + i) })) || [];
+
+    return { rows: expandedRows, cols, blocks: blocks.length, score: expandedRows.length };
 }
+
+function discoverGridRobust(imageData) {
+    // Try current orientation
+    const result0 = detectGridOnImage(imageData);
+    console.log(`[OPR Grid] Orientation 0°: ${result0.score} questions, ${result0.blocks} blocks`);
+
+    if (result0.score >= 5) return result0;
+
+    // If that failed, try rotating 90° CW
+    console.warn(`[OPR Grid] 0° orientation insufficient (${result0.score} questions). Trying 90°CW...`);
+    const rotated = rotateImageData90CW(imageData);
+    const result90 = detectGridOnImage(rotated);
+    console.log(`[OPR Grid] Orientation 90°CW: ${result90.score} questions, ${result90.blocks} blocks`);
+
+    if (result90.score > result0.score) {
+        console.log(`[OPR Grid] Using 90°CW orientation (better: ${result90.score} vs ${result0.score})`);
+        return result90;
+    }
+
+    // Return best effort even if score < 5
+    return result0.score >= result90.score ? result0 : result90;
+}
+
+
+
 
 
 

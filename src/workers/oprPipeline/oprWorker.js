@@ -84,9 +84,10 @@ self.onmessage = async (e) => {
 
             self.postMessage({
                 success: true,
-                results: rowResults,
+                omrResults: rowResults,  // Key expected by MarkTest.jsx
+                results: rowResults,     // Backward compat alias
                 layoutResult: geometry.layoutResult,
-                warpedBlob, // Return the image for UI verification
+                warpedBlob,
                 meta: {
                     blurScore: quality.blurScore,
                     glareScore: quality.glareScore,
