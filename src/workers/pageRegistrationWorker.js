@@ -459,111 +459,78 @@ function warpPerspective(srcImgData, srcQuad, dstW, dstH) {
 
 function detectAndFixRotation(imageData) {
     const { width, height, data } = imageData;
-    const sw = 200;
-    const sh = Math.round(height * (sw / width));
-    const smallGray = new Uint8Array(sw * sh);
+    const cw = width;
+    const ch = height;
 
-    for (let y = 0; y < sh; y++) {
-        for (let x = 0; x < sw; x++) {
-            const si = (Math.round(y * (height / sh)) * width + Math.round(x * (width / sw))) * 4;
-            smallGray[y * sw + x] = data[si] * 0.299 + data[si + 1] * 0.587 + data[si + 2] * 0.114;
+    // Fast density check of the 4 outer margins (15% thickness)
+    const marginY = Math.floor(ch * 0.15);
+    const marginX = Math.floor(cw * 0.15);
+
+    let topInk = 0, bottomInk = 0, leftInk = 0, rightInk = 0;
+
+    // We only sample every 4th pixel for phenomenal speed
+    const step = 4;
+
+    // Top
+    for (let y = 0; y < marginY; y += step) {
+        for (let x = 0; x < cw; x += step) {
+            const i = (y * cw + x) * 4;
+            if (data[i] < 128) topInk++; // Dark pixel
+        }
+    }
+    // Bottom
+    for (let y = ch - marginY; y < ch; y += step) {
+        for (let x = 0; x < cw; x += step) {
+            const i = (y * cw + x) * 4;
+            if (data[i] < 128) bottomInk++;
+        }
+    }
+    // Left
+    for (let x = 0; x < marginX; x += step) {
+        for (let y = 0; y < ch; y += step) {
+            const i = (y * cw + x) * 4;
+            if (data[i] < 128) leftInk++;
+        }
+    }
+    // Right
+    for (let x = cw - marginX; x < cw; x += step) {
+        for (let y = 0; y < ch; y += step) {
+            const i = (y * cw + x) * 4;
+            if (data[i] < 128) rightInk++;
         }
     }
 
-    // Heuristic: Check density peaks. OMR rows have strong horizontal peaks.
-    const hProfile = new Float32Array(sh);
-    const vProfile = new Float32Array(sw);
+    // Densities scaled to be comparable regardless of horizontal vs vertical margins
+    const topDensity = topInk / ((cw / step) * (marginY / step));
+    const botDensity = bottomInk / ((cw / step) * (marginY / step));
+    const leftDensity = leftInk / ((ch / step) * (marginX / step));
+    const rightDensity = rightInk / ((ch / step) * (marginX / step));
 
-    for (let y = 0; y < sh; y++) {
-        let sum = 0;
-        for (let x = 0; x < sw; x++) sum += (255 - smallGray[y * sw + x]);
-        hProfile[y] = sum / sw;
-    }
-    for (let x = 0; x < sw; x++) {
-        let sum = 0;
-        for (let y = 0; y < sh; y++) sum += (255 - smallGray[y * sw + x]);
-        vProfile[x] = sum / sh;
-    }
+    console.log(`[Orientation] Edge densities - Top:${topDensity.toFixed(3)}, Bot:${botDensity.toFixed(3)}, L:${leftDensity.toFixed(3)}, R:${rightDensity.toFixed(3)}`);
 
-    const hPeaks = countPeaks(hProfile);
-    const vPeaks = countPeaks(vProfile);
-    console.log(`[Orientation] hPeaks: ${hPeaks}, vPeaks: ${vPeaks}, imgAspect: ${(width / height).toFixed(2)}`);
+    const maxDensity = Math.max(topDensity, botDensity, leftDensity, rightDensity);
 
     let workingData = imageData;
 
-    // STEP 1: Determine if image content is rotated 90 degrees
-    // If the image is currently portrait, but the content is landscape,
-    // the "rows" run vertically, so vPeaks will be much higher than hPeaks.
-    if (vPeaks > hPeaks * 1.2) {
-        // We need to rotate 90 degrees.
-        // Let's decide +90 (CW) or -90 (CCW) by checking ink density.
-        // In a typical ECZ sheet, there is a dense header block at the "Top".
-        // If it was captured rotated 90 CW (Top is Right), left density < right density. -> Fix: 270 CW.
-        // If it was captured rotated 90 CCW (Top is Left), left density > right density. -> Fix: 90 CW.
-        const leftDensity = average(vProfile.slice(0, Math.floor(sw / 4)));
-        const rightDensity = average(vProfile.slice(Math.floor(3 * sw / 4)));
-
-        if (leftDensity > rightDensity) {
-            console.warn("[Orientation] Content is sideways (Top is Left). Rotating 90° CW...");
-            workingData = rotateImageData(workingData, 90);
-        } else {
-            console.warn("[Orientation] Content is sideways (Top is Right). Rotating 270° CW...");
-            workingData = rotateImageData(workingData, 270);
-        }
+    // If the heaviest ink edge is not the top, rotate so it becomes the top.
+    // The "Header" of an OMR form (Logo, Title, Instructions) is always the densest edge.
+    if (maxDensity === leftDensity && leftDensity > Math.max(topDensity, rightDensity) * 1.2) {
+        console.warn("[Orientation] Header is on the LEFT. Rotating +90° CW to make upright.");
+        workingData = rotateImageData(workingData, 90);
     }
-
-    // STEP 2: Check for Upside-Down (180°)
-    // Recalculate horizontal profile for the now-portrait image
-    const finalHProfile = new Float32Array(Math.max(width, height));
-    const isWarped = workingData !== imageData;
-    const cw = workingData.width;
-    const ch = workingData.height;
-
-    // Fast density check top vs bottom 15%
-    const checkY1 = Math.floor(ch * 0.15);
-    const checkY2 = Math.floor(ch * 0.85);
-
-    let topInk = 0, bottomInk = 0;
-    for (let y = 0; y < checkY1; y++) {
-        for (let x = 0; x < cw; x += 4) {
-            const i = (y * cw + x) * 4;
-            if (workingData.data[i] < 128) topInk++;
-        }
+    else if (maxDensity === rightDensity && rightDensity > Math.max(topDensity, leftDensity) * 1.2) {
+        console.warn("[Orientation] Header is on the RIGHT. Rotating 270° CW to make upright.");
+        workingData = rotateImageData(workingData, 270);
     }
-    for (let y = checkY2; y < ch; y++) {
-        for (let x = 0; x < cw; x += 4) {
-            const i = (y * cw + x) * 4;
-            if (workingData.data[i] < 128) bottomInk++;
-        }
-    }
-
-    console.log(`[Orientation] Upright Header Ink: Top=${topInk}, Bottom=${bottomInk}`);
-
-    // If the bottom has significantly more ink than the top, it's upside down.
-    if (bottomInk > topInk * 1.5) {
-        console.warn("[Orientation] Page is upside-down. Rotating 180°...");
+    else if (maxDensity === botDensity && botDensity > topDensity * 1.5) {
+        console.warn("[Orientation] Header is on the BOTTOM. Rotating 180° to make upright.");
         workingData = rotateImageData(workingData, 180);
     }
-
-    console.log("[Orientation] Final upright portrait image confirmed.");
-    return workingData;
-}
-
-function countPeaks(profile) {
-    let count = 0;
-    const threshold = average(profile) * 1.2;
-    for (let i = 2; i < profile.length - 2; i++) {
-        if (profile[i] > threshold && profile[i] > profile[i - 1] && profile[i] > profile[i + 1]) {
-            count++;
-            i += 5; // skip neighborhood
-        }
+    else {
+        console.log("[Orientation] Header is at the TOP. Already upright.");
     }
-    return count;
-}
 
-function average(arr) {
-    if (arr.length === 0) return 0;
-    return arr.reduce((a, b) => a + b, 0) / arr.length;
+    return workingData;
 }
 
 function rotateImageData(imageData, degrees) {
