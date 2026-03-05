@@ -100,17 +100,30 @@ export function decideRows(classifiedBubbles, totalQuestions) {
             confidence = 0.55;
         }
 
+        // Build debug info — per-option means and coords for diagnosis
+        const debug = {
+            options: Object.fromEntries(bubbles.map(b => [
+                b.label,
+                { mean: Math.round(b.stats.mean), x: b.x, y: b.y, state: b.state }
+            ])),
+            rowDelta: Math.round(rowDelta),
+            margin: Math.round(margin),
+            fillRatio: Math.round(relativeFillRatio * 100)
+        };
+
         results.push({
             question_number: qNum,
             detected_answer,
             status,
             confidence,
-            method: 'opr'
+            method: 'opr',
+            debug
         });
     }
 
     return results;
 }
+
 
 export function validateSheet(rowResults) {
     const total = rowResults.length;
