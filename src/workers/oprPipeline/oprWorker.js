@@ -60,7 +60,24 @@ self.onmessage = async (e) => {
                 });
             }
 
-            // -- STAGE 2: Bubble Candidate Detection --
+            // -- STAGE 2: Question Number Remapping (multi-block) --
+            const numBlocks = geometry.layoutResult.blocks || 1;
+            if (numBlocks > 1 && markingSchemeCount) {
+                const questionsPerBlock = Math.ceil(markingSchemeCount / numBlocks);
+                const totalRowsPerBlock = Math.floor(geometry.gridModel.rows.length / numBlocks);
+
+                console.log(`[OPR Remap] ${numBlocks} blocks, totalQ=${markingSchemeCount}, questionsPerBlock=${questionsPerBlock}, rowsPerBlock=${totalRowsPerBlock}`);
+
+                geometry.gridModel.rows.forEach(row => {
+                    // Original blockIdx and rowIdx within that block
+                    const origBlockIdx = Math.floor((row.question_number - 1) / totalRowsPerBlock);
+                    const origRowInBlock = (row.question_number - 1) % totalRowsPerBlock;
+                    // Re-map: only use first questionsPerBlock rows per block
+                    row.question_number = origBlockIdx * questionsPerBlock + origRowInBlock + 1;
+                });
+            }
+
+            // -- STAGE 2b: Bubble Candidate Detection --
             console.log('[OPR] Stage 2: Candidate Detection...');
             const candidates = detectCandidates(geometry.warpedImageData, geometry.gridModel);
 
@@ -71,6 +88,7 @@ self.onmessage = async (e) => {
             // -- STAGE 4: Row Decision Engine --
             console.log('[OPR] Stage 4: Decision Engine...');
             const rowResults = decideRows(classifiedBubbles, markingSchemeCount);
+
 
             // -- STAGE 5: Sheet Sanity Validator --
             console.log('[OPR] Stage 5: Sanity Validator...');
