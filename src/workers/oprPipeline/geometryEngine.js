@@ -330,8 +330,8 @@ function detectGridOnImage(imageData, expectedOptions = 4) {
     });
 
     const sortedV = [...vProfile].sort((a, b) => a - b);
-    // V-Threshold: at least 40% of rows must have ink at this X 
-    const vThreshold = Math.max(validRows.length * 0.4, sortedV[Math.floor(sortedV.length * 0.75)]);
+    // V-Threshold: lowered from 0.4 to 0.2 to ensure single-digit numbers (1, 7) are detected
+    const vThreshold = Math.max(validRows.length * 0.2, sortedV[Math.floor(sortedV.length * 0.75)]);
     // DENSITY CAP: Avoid picking up thick vertical lines (e.g. table borders)
     const vDensityCap = validRows.length * 4.5;
 
@@ -378,14 +378,18 @@ function detectGridOnImage(imageData, expectedOptions = 4) {
     const expandedRows = [];
     validRows.forEach((row, rowIdx) => {
         blocks.forEach((block, bIdx) => {
-            // Updated Heuristic: 
-            // 1. If we have exactly options+1 cols, Col 0 is almost certainly the Number.
-            // 2. If first gap is substantial, it's definitely a Number.
-            const firstGap = block.length > 1 ? (block[1].x - block[0].x) : 0;
-            const hasNum = (block.length === (expectedOptions + 1)) ||
-                (block.length >= 4 && firstGap > medianGapVal * 1.25);
+            // DENSITY CLASSIFICATION:
+            // Bubble columns ALWAYS have more ink pixels (strength) than Number columns.
+            // Empty bubbles are circles; Numbers are dots and lines.
+            // We identify the 'Number' column as the one with the least total ink in the block.
+            const sortedByDensity = [...block].sort((a, b) => a.strength - b.strength);
+            const leastDenselyInked = sortedByDensity[0];
 
-            const optionCols = block.filter((_, ci) => !(hasNum && ci === 0));
+            // If we have more than the expected number of options, we MUST drop the least dense one (the number).
+            // We're aggressive here because the shifter is a critical failure.
+            const hasNum = block.length > expectedOptions;
+
+            const optionCols = block.filter((c) => !(hasNum && c.x === leastDenselyInked.x));
             const blockCols = optionCols.map((c, ci) => ({
                 ...c,
                 label: String.fromCharCode(64 + (ci + 1)) // 65 is 'A'
