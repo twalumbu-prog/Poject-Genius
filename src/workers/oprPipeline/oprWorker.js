@@ -1,10 +1,9 @@
 /* src/workers/oprPipeline/oprWorker.js */
 import { checkQuality } from './qualityGate.js';
-import { extractGeometry } from './geometryEngine.js';
-import { detectCandidates } from './bubbleProcessor.js';
-import { classifyStates } from './bubbleProcessor.js';
-import { decideRows } from './decisionEngine.js';
-import { validateSheet } from './decisionEngine.js';
+import { performPageRegistration, performGridModeling } from './geometryEngine.js';
+import { detectCandidates, classifyStates } from './bubbleProcessor.js';
+import { decideRows, validateSheet } from './decisionEngine.js';
+import { normalizeIllumination, binarizeAdaptive } from './preprocessor.js';
 
 console.log('[OPR Worker] Source loaded and initialized');
 
@@ -49,18 +48,37 @@ self.onmessage = async (e) => {
                 });
             }
 
-            // -- STAGE 1: Geometric Truth Engine --
-            console.log('[OPR] Stage 1: Geometry Engine...');
-            const geometry = extractGeometry(imageData);
+            // -- LAYER 2: Page Detection & Registration --
+            console.log('[OPR] Layer 2: Page Registration...');
+            const registration = performPageRegistration(imageData);
+            if (!registration.success) {
+                return self.postMessage({
+                    success: false,
+                    error: `REGISTRATION_FAILURE: ${registration.reason}`,
+                    telemetry: { quality }
+                });
+            }
+
+            // -- LAYER 3: Illumination Normalization --
+            console.log('[OPR] Layer 3: Illumination Normalization...');
+            const normalizedImageData = normalizeIllumination(registration.warpedImageData);
+
+            // -- LAYER 4: Adaptive Binarization --
+            console.log('[OPR] Layer 4: Adaptive Binarization...');
+            const binaryImageData = binarizeAdaptive(normalizedImageData);
+
+            // -- LAYER 5 & 6: Grid Modeling --
+            console.log('[OPR] Layer 5 & 6: Grid Modeling...');
+            const geometry = performGridModeling(binaryImageData);
             if (!geometry.success) {
                 return self.postMessage({
                     success: false,
                     error: `GEOMETRY_FAILURE: ${geometry.reason}`,
-                    telemetry: { quality, geometry }
+                    telemetry: { quality, registration }
                 });
             }
 
-            // -- STAGE 2: Question Number Remapping (multi-block) --
+            // -- LAYER 6.5: Question Number Remapping --
             const numBlocks = geometry.layoutResult.blocks || 1;
             if (markingSchemeCount) {
                 // ECZ sheets usually have 20 questions per column
@@ -105,38 +123,40 @@ self.onmessage = async (e) => {
 
 
 
-            // -- STAGE 2b: Bubble Candidate Detection --
-            console.log('[OPR] Stage 2: Candidate Detection...');
-            const candidates = detectCandidates(geometry.warpedImageData, geometry.gridModel);
+            // -- LAYER 7: Candidates & Classification --
+            console.log('[OPR] Layer 7: Bubble Classification (using Normalized image)...');
+            // Classification MUST use the shadow-normalized image, NOT binary.
+            const candidates = detectCandidates(normalizedImageData, geometry.gridModel);
+            const classifiedBubbles = classifyStates(candidates, normalizedImageData);
 
-            // -- STAGE 3: Bubble State Classification --
-            console.log('[OPR] Stage 3: State Classification...');
-            const classifiedBubbles = classifyStates(candidates, geometry.warpedImageData);
-
-            // -- STAGE 4: Row Decision Engine --
-            console.log('[OPR] Stage 4: Decision Engine...');
+            // -- LAYER 8: Row Decision Engine --
+            console.log('[OPR] Layer 8: Decision Engine...');
             const rowResults = decideRows(classifiedBubbles, markingSchemeCount);
 
-
-            // -- STAGE 5: Sheet Sanity Validator --
-            console.log('[OPR] Stage 5: Sanity Validator...');
+            // -- LAYER 9: Sheet Sanity Validator --
+            console.log('[OPR] Layer 9: Sanity Validator...');
             const sanity = validateSheet(rowResults);
 
             console.log('[OPR] Complete!');
-            // Create a blob from warpedImageData for debugging
-            const debugCanvas = new OffscreenCanvas(geometry.warpedImageData.width, geometry.warpedImageData.height);
-            debugCanvas.getContext('2d').putImageData(geometry.warpedImageData, 0, 0);
-            const warpedBlob = await debugCanvas.convertToBlob();
+            // Create blobs for step-by-step inspection
+            const [warpedBlob, normalizedBlob, binaryBlob] = await Promise.all([
+                imageDataToBlob(registration.warpedImageData),
+                imageDataToBlob(normalizedImageData),
+                imageDataToBlob(binaryImageData)
+            ]);
 
             self.postMessage({
                 success: true,
-                omrResults: rowResults,  // Key expected by MarkTest.jsx
-                results: rowResults,     // Backward compat alias
+                omrResults: rowResults,
+                results: rowResults,
                 layoutResult: geometry.layoutResult,
                 warpedBlob,
+                normalizedBlob,
+                binaryBlob,
                 meta: {
                     blurScore: quality.blurScore,
                     glareScore: quality.glareScore,
+                    registration_confidence: registration.registration_confidence,
                     version: '1.0.0-beta'
                 }
             });
@@ -151,3 +171,10 @@ self.onmessage = async (e) => {
         }
     }
 };
+
+async function imageDataToBlob(imageData) {
+    if (!imageData) return null;
+    const canvas = new OffscreenCanvas(imageData.width, imageData.height);
+    canvas.getContext('2d').putImageData(imageData, 0, 0);
+    return await canvas.convertToBlob();
+}

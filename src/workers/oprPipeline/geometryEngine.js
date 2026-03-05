@@ -1,34 +1,41 @@
-/* src/workers/oprPipeline/geometryEngine.js */
-
-export function extractGeometry(imageData) {
-    const { width, height } = imageData;
-
-    // 1. Robust Quad Detection
+/**
+ * Layer 2: Page Detection & Registration
+ * Converts raw photo to perfectly flat canonical document.
+ * Returns warped original image data.
+ */
+export function performPageRegistration(imageData) {
     const quadResult = detectRobustQuad(imageData);
     if (!quadResult.success) {
-        console.warn(`[OPR Geometry] Quad detection failed: ${quadResult.reason}`);
         return { success: false, reason: quadResult.reason || 'NO_PAGE_QUAD' };
     }
 
-    const quad = quadResult.quad;
-
-    // 2. Perspective Warp
     const TARGET_H = 1800;
     const TARGET_W = 1272;
-    const initialWarpedImageData = warpPerspective(imageData, quad, TARGET_W, TARGET_H);
+    const warpedImageData = warpPerspective(imageData, quadResult.quad, TARGET_W, TARGET_H);
 
-    // 3. Grid Discovery & Orientation Correction
-    // discoverGridRobust now returns the image that worked
-    const { gridModel, finalImageData } = discoverGridRobust(initialWarpedImageData);
+    return {
+        success: true,
+        warpedImageData,
+        quad: quadResult.quad,
+        registration_confidence: quadResult.fallback ? 0.5 : 0.95
+    };
+}
+
+/**
+ * Layers 5 & 6: Layout Detection & Grid Modeling
+ * Uses binarized image to detect rows and predict expected bubble centers.
+ */
+export function performGridModeling(binaryWarpedData) {
+    const { gridModel, finalImageData: orientedBinaryData } = discoverGridRobust(binaryWarpedData);
 
     if (gridModel.rows.length === 0 || gridModel.cols.length === 0) {
-        return { success: false, reason: 'GRID_DISCOVERY_FAILED', details: `Rows: ${gridModel.rows.length}, Cols: ${gridModel.cols.length}` };
+        return { success: false, reason: 'GRID_MODELING_FAILED' };
     }
 
     return {
         success: true,
-        warpedImageData: finalImageData, // IMPORTANT: Use the image that actually has the grid
         gridModel,
+        orientedBinaryData,
         layoutResult: {
             blocks: gridModel.blocks || 1,
             regions: gridModel.rows.map(row => ({
@@ -39,6 +46,15 @@ export function extractGeometry(imageData) {
             }))
         }
     };
+}
+
+// Deprecated: legacy entry point
+export function extractGeometry(imageData) {
+    const reg = performPageRegistration(imageData);
+    if (!reg.success) return reg;
+    const grid = performGridModeling(reg.warpedImageData);
+    if (!grid.success) return grid;
+    return { ...grid, warpedImageData: reg.warpedImageData };
 }
 
 function detectRobustQuad(imageData) {

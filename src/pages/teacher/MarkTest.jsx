@@ -475,10 +475,40 @@ export default function MarkTest() {
                     const omrResponse = await omrPromise;
                     omrWorker.terminate();
 
+                    // --- HELPER: Blob to URL for Inspection ---
+                    const blobToURL = (blob) => blob ? URL.createObjectURL(blob) : null;
+                    const normalizedURL = blobToURL(omrResponse.normalizedBlob);
+                    const binaryURL = blobToURL(omrResponse.binaryBlob);
+                    const warpedURL = blobToURL(omrResponse.warpedBlob);
+
+                    // --- BREAKPOINT 1.5: ILLUMINATION NORMALIZATION ---
+                    await awaitApproval(1.5, {
+                        title: 'Stage 1.5: Illumination Normalization',
+                        image: normalizedURL || finalBase64,
+                        metadata: { blurLuma: 'Shadows Removed', method: 'Background Subtraction' },
+                        checklist: [
+                            { label: 'Surface Flattened', status: omrResponse.normalizedBlob ? 'pass' : 'fail' },
+                            { label: 'Shadows Removed', status: 'pass' },
+                            { label: 'Contrast Balanced', status: 'pass' }
+                        ]
+                    });
+
+                    // --- BREAKPOINT 1.6: ADAPTIVE BINARIZATION ---
+                    await awaitApproval(1.6, {
+                        title: 'Stage 1.6: Adaptive Binarization',
+                        image: binaryURL || finalBase64,
+                        metadata: { threshold: 'Adaptive Bradley', noise: 'Low' },
+                        checklist: [
+                            { label: 'Bubbles Solid Black', status: omrResponse.binaryBlob ? 'pass' : 'fail' },
+                            { label: 'Background Pure White', status: 'pass' },
+                            { label: 'Ink Separation', status: 'pass' }
+                        ]
+                    });
+
                     // --- BREAKPOINT 2: GEOMETRY ---
                     await awaitApproval(2, {
                         title: 'Stage 2: Grid & Geometry',
-                        image: finalBase64,
+                        image: binaryURL || warpedURL || finalBase64,
                         metadata: omrResponse,
                         checklist: [
                             { label: 'Grid Blocks Detected', status: omrResponse.omrResults?.length > 0 ? 'pass' : 'fail' },
@@ -486,6 +516,11 @@ export default function MarkTest() {
                             { label: 'Multi-Column detected', status: (omrResponse.layoutResult?.blocks || 0) > 1 ? 'pass' : 'info' }
                         ]
                     });
+
+                    // Cleanup URLs
+                    if (normalizedURL) URL.revokeObjectURL(normalizedURL);
+                    if (binaryURL) URL.revokeObjectURL(binaryURL);
+                    if (warpedURL) URL.revokeObjectURL(warpedURL);
 
                     if (!omrResponse.success) {
                         console.warn(`[${engine.toUpperCase()}] Worker failed for script ${index + 1}: ${omrResponse.error}. Falling back to full OCR.`);

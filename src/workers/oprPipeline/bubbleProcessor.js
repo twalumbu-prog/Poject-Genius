@@ -97,42 +97,52 @@ function findLocalDarkest(data, w, h, cx, cy, radius) {
 
 
 export function classifyStates(candidates) {
-    // 1. Compute global "paper" baseline from the BRIGHTEST patches
-    // (75th percentile means most patches are paper = unfilled)
-    const baselineIntensities = candidates.map(c => c.stats.mean).sort((a, b) => a - b);
-    const paperWhite = baselineIntensities[Math.floor(baselineIntensities.length * 0.75)];
-    console.log(`[OPR Classification] Paper baseline: ${Math.round(paperWhite)}`);
-
-    // 2. Adaptive thresholds
-    const filledDelta = 55;   // darkness delta from paper → filled (lowered from 65: smaller patch = less dilution)
-    const erasureDelta = 30;  // darkness delta → erasure suspect
-
-    return candidates.map(c => {
-        const ps = c.patchSize || 30;  // use actual patch size used for this candidate
-        const patchArea = ps * ps;
-        const delta = paperWhite - c.stats.mean;
-        const fillRatio = c.stats.darkPixels / patchArea;  // ← CRITICAL FIX: was hardcoded 30*30
-
-        let state = 'EMPTY';
-        let confidence = 0.95;
-
-        if (delta > filledDelta && fillRatio > 0.35) {
-            state = 'FILLED';
-        } else if (delta > erasureDelta && fillRatio > 0.15) {
-            state = 'ERASURE_SUSPECT';
-            confidence = 0.6;
-        } else {
-            state = 'EMPTY';
-        }
-
-        return {
-            ...c,
-            state,
-            delta,
-            fillRatio,
-            confidence
-        };
+    // 1. Group candidates by Row (Question Number)
+    const rows = {};
+    candidates.forEach(c => {
+        if (!rows[c.q_num]) rows[c.q_num] = [];
+        rows[c.q_num].push(c);
     });
+
+    const results = [];
+
+    // 2. Process each row statistically
+    Object.values(rows).forEach(rowCandidates => {
+        // Calculate Row Mean and StdDev of bubble intensities
+        const intensities = rowCandidates.map(c => c.stats.mean);
+        const rowMean = intensities.reduce((a, b) => a + b, 0) / intensities.length;
+        const rowSqDiffs = intensities.map(v => Math.pow(v - rowMean, 2));
+        const rowStd = Math.sqrt(rowSqDiffs.reduce((a, b) => a + b, 0) / intensities.length);
+
+        // Standard OMR Z-Score logic: 
+        // A filled bubble is a significant outlier from the row's own baseline.
+        rowCandidates.forEach(c => {
+            const zScore = rowStd > 2 ? (rowMean - c.stats.mean) / rowStd : 0;
+            const fillRatio = c.stats.darkPixels / (c.patchSize * c.patchSize);
+
+            let state = 'EMPTY';
+            let confidence = 0.95;
+
+            // Z-Score > 1.8 is a strong signal for "Filled" relative to row
+            if (zScore > 1.8 && fillRatio > 0.3) {
+                state = 'FILLED';
+                confidence = Math.min(0.99, 0.7 + (zScore / 5));
+            } else if (zScore > 1.0 || (fillRatio > 0.15 && rowMean - c.stats.mean > 25)) {
+                state = 'ERASURE_SUSPECT';
+                confidence = 0.5;
+            }
+
+            results.push({
+                ...c,
+                state,
+                zScore: Math.round(zScore * 100) / 100,
+                fillRatio: Math.round(fillRatio * 100) / 100,
+                confidence
+            });
+        });
+    });
+
+    return results;
 }
 
 

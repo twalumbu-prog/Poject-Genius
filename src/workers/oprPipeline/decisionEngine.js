@@ -47,68 +47,53 @@ export function decideRows(classifiedBubbles, totalQuestions) {
 
         console.log(`[OPR Row ${qNum}] darkest=${darkest.label}(mean=${Math.round(darkest.stats.mean)}) margin=${Math.round(margin)} rowDelta=${Math.round(rowDelta)} fillRatio=${relativeFillRatio.toFixed(2)}`);
 
-        // ── DECISION THRESHOLDS (tunable) ──
-        const MIN_ROW_DELTA = 20;    // darkest must be >=20 luma darker than row's own paper
-        const MIN_MARGIN = 5;        // must stand out >=5 luma from next option (lowered from 8)
-        const MIN_FILL_RATIO = 0.20; // at least 20% of the patch must be "ink"
+        // ── DECISION THRESHOLDS (Statistical) ──
+        const MIN_Z_SCORE = 1.7;    // must be 1.7+ std dev darker than row mean
+        const MIN_FILL_RATIO = 0.25;
+        const MIN_MARGIN = 0.5;      // Z-Score margin from next best option
+
+        // Sort by Z-Score (descending = darkest first)
+        const zSorted = [...bubbles].sort((a, b) => (b.zScore || 0) - (a.zScore || 0));
+        const bestZ = zSorted[0];
+        const nextZ = zSorted[1];
+        const zMargin = nextZ ? (bestZ.zScore - nextZ.zScore) : 999;
 
         // Check global pre-classified states for cross-validation
         const globalFilled = bubbles.filter(b => b.state === 'FILLED');
         const globalSuspects = bubbles.filter(b => b.state === 'ERASURE_SUSPECT');
 
-        if (rowDelta >= MIN_ROW_DELTA && margin >= MIN_MARGIN && relativeFillRatio >= MIN_FILL_RATIO) {
-            // Confident single answer detected by relative method
-            detected_answer = darkest.label;
+        if (bestZ.zScore >= MIN_Z_SCORE && bestZ.fillRatio >= MIN_FILL_RATIO && zMargin >= MIN_MARGIN) {
+            // Confident single answer detected by Z-Score outlier
+            detected_answer = bestZ.label;
             status = 'clear';
-            // Boost confidence if global classification agrees
-            if (globalFilled.length === 1 && globalFilled[0].label === darkest.label) {
-                confidence = 0.97;
-            } else if (globalFilled.length === 1 && globalFilled[0].label !== darkest.label) {
-                confidence = 0.70; // Disagreement - lower confidence
-            } else {
-                confidence = 0.85;
-            }
+            confidence = Math.min(0.99, 0.8 + (bestZ.zScore / 10));
         } else if (globalFilled.length === 1) {
-            // Global classification found exactly one filled - trust it
+            // Global classification found exactly one filled - trust it as fallback
             detected_answer = globalFilled[0].label;
             status = 'clear';
             confidence = globalFilled[0].confidence;
         } else if (globalFilled.length > 1) {
-            // Multiple globally filled: use relative to pick the one that stands out most
-            const bestGlobalFilled = globalFilled.reduce((best, b) =>
-                b.stats.mean < best.stats.mean ? b : best
+            // Multiple globally filled: pick the one with highest Z-Score
+            const bestFromGlobal = globalFilled.reduce((best, b) =>
+                (b.zScore || 0) > (best.zScore || 0) ? b : best
             );
-            // Check if one is significantly darker than the others
-            const globalSorted = globalFilled.sort((a, b) => a.stats.mean - b.stats.mean);
-            const globalMargin = globalSorted.length > 1 ? globalSorted[1].stats.mean - globalSorted[0].stats.mean : 999;
-            if (globalMargin >= MIN_MARGIN) {
-                detected_answer = bestGlobalFilled.label;
-                status = 'clear';
-                confidence = 0.75;
-            } else {
-                status = 'multi';
-                detected_answer = globalFilled.map(f => f.label).join(',');
-                confidence = 0.4;
-            }
+            detected_answer = bestFromGlobal.label;
+            status = 'clear';
+            confidence = 0.75;
         } else if (globalSuspects.length > 0) {
             status = 'ambiguous';
             confidence = 0.5;
-        } else if (rowDelta >= MIN_ROW_DELTA * 0.6 && relativeFillRatio >= MIN_FILL_RATIO * 0.7) {
-            // Soft match - one option is darker but not meeting all thresholds
-            detected_answer = darkest.label;
-            status = 'ambiguous';
-            confidence = 0.55;
         }
 
-        // Build debug info — per-option means and coords for diagnosis
+        // Build debug info
         const debug = {
             options: Object.fromEntries(bubbles.map(b => [
                 b.label,
-                { mean: Math.round(b.stats.mean), x: b.x, y: b.y, state: b.state }
+                { mean: Math.round(b.stats.mean), z: b.zScore, fill: b.fillRatio, state: b.state }
             ])),
-            rowDelta: Math.round(rowDelta),
-            margin: Math.round(margin),
-            fillRatio: Math.round(relativeFillRatio * 100)
+            zScore: bestZ.zScore,
+            zMargin: Math.round(zMargin * 100) / 100,
+            fillRatio: Math.round(bestZ.fillRatio * 100)
         };
 
         results.push({
