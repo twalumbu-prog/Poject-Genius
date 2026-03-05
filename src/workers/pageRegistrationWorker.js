@@ -490,24 +490,37 @@ function detectAndFixRotation(imageData) {
         // If it's rotated, the relative positions of anchors change
     }
 
-    console.log(`[Orientation] hPeaks: ${hPeaks}, vPeaks: ${vPeaks}`);
+    console.log(`[Orientation] hPeaks: ${hPeaks}, vPeaks: ${vPeaks}, imgAspect: ${(width / height).toFixed(2)}`);
 
-    // If vertical peaks are significantly stronger, it's likely rotated 90 or 270 deg
+    // SAFETY CHECK: If the warp already produced a portrait image (height > width),
+    // we trust the warp output and skip rotation. The warp to TARGET_W x TARGET_H
+    // already produces a portrait aspect ratio; rotating it again would be wrong.
+    if (height > width) {
+        // Image is already portrait. Only check for upside-down (180° rotation).
+        const topDensity = average(hProfile.slice(0, Math.floor(sh / 4)));
+        const botDensity = average(hProfile.slice(Math.floor(3 * sh / 4)));
+        if (botDensity < topDensity * 0.5) {
+            console.warn("[Orientation] Page is portrait but upside-down. Rotating 180deg...");
+            return rotateImageData(imageData, 180);
+        }
+        console.log("[Orientation] Image is portrait. No rotation needed.");
+        return imageData;
+    }
+
+    // Image is landscape (width > height) — if it's an OMR sheet,
+    // the question rows should form strong HORIZONTAL bands.
+    // If vPeaks > hPeaks, the OMR rows are running vertically = 90° CW rotation needed.
     if (vPeaks > hPeaks * 1.5) {
-        console.warn("[Orientation] Page appears to be rotated (Landscape detected). Rotating -90deg...");
-        return rotateImageData(imageData, -90);
+        console.warn("[Orientation] Landscape image with vertical structure. Rotating +90deg CW...");
+        return rotateImageData(imageData, 90);
+    }
+    if (hPeaks > vPeaks * 1.5) {
+        console.warn("[Orientation] Landscape image with horizontal structure. Rotating -90deg CCW...");
+        return rotateImageData(imageData, 270);
     }
 
-    // Check for 180 (Upside down)
-    // Heuristic: Header usually has more white space than the bottom (which has more bubbles)
-    const topDensity = average(hProfile.slice(0, sh / 4));
-    const botDensity = average(hProfile.slice(3 * sh / 4));
-
-    if (botDensity < topDensity * 0.5) {
-        console.warn("[Orientation] Page appears to be upside down. Rotating 180deg...");
-        return rotateImageData(imageData, 180);
-    }
-
+    // No clear signal — leave as is
+    console.log("[Orientation] No clear rotation needed. Using as-is.");
     return imageData;
 }
 

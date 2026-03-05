@@ -357,15 +357,29 @@ function discoverGridRobust(imageData) {
     }
 
     // ══ 7. BUILD EXPANDED ROWS WITH CORRECT QUESTION NUMBERS ══
+    // MAX_COLS_PER_BLOCK: ECZ sheets have at most NUM + A,B,C,D = 5 columns per block.
+    // Cap each block to this to prevent A-Z label overflow from noisy peaks.
+    const MAX_COLS_PER_BLOCK = 5;
+
+    const clampedBlocks = blocks.map(block => {
+        if (block.length <= MAX_COLS_PER_BLOCK) return block;
+
+        // Too many detected columns: use only the top-N strongest peaks
+        return [...block]
+            .sort((a, b) => b.strength - a.strength)
+            .slice(0, MAX_COLS_PER_BLOCK)
+            .sort((a, b) => a.x - b.x); // re-sort by x position
+    });
+
     const expandedRows = [];
     const questionsPerBlock = rows.length;
 
-    blocks.forEach((block, blockIdx) => {
+    clampedBlocks.forEach((block, blockIdx) => {
         // Label columns: if 5 peaks → [NUM, A, B, C, D]; if 4 peaks → [A, B, C, D]
         const hasNum = block.length === 5;
         const blockCols = block
-            .filter((_, i) => !(hasNum && i === 0)) // remove NUM column
-            .map((c, i) => ({ ...c, label: String.fromCharCode(65 + i) }));
+            .filter((_, i) => !(hasNum && i === 0)) // remove NUM column (first peak)
+            .map((c, i) => ({ ...c, label: String.fromCharCode(65 + i) })); // A, B, C, D
 
         rows.forEach((row, rowIdx) => {
             expandedRows.push({
@@ -378,9 +392,11 @@ function discoverGridRobust(imageData) {
 
     return {
         rows: expandedRows,
-        cols: blocks[0]
-            ?.filter((_, i) => !(blocks[0].length === 5 && i === 0))
+        cols: clampedBlocks[0]
+            ?.filter((_, i) => !(clampedBlocks[0].length === 5 && i === 0))
             .map((c, i) => ({ ...c, label: String.fromCharCode(65 + i) })) || []
     };
 }
+
+
 
