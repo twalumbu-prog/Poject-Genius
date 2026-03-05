@@ -64,29 +64,39 @@ self.onmessage = async (e) => {
             const numBlocks = geometry.layoutResult.blocks || 1;
             if (numBlocks > 1 && markingSchemeCount) {
                 const questionsPerBlock = Math.ceil(markingSchemeCount / numBlocks);
-                const totalRowsPerBlock = Math.floor(geometry.gridModel.rows.length / numBlocks);
+                console.log(`[OPR Remap] ${numBlocks} blocks, totalQ=${markingSchemeCount}, questionsPerBlock=${questionsPerBlock}`);
 
-                console.log(`[OPR Remap] ${numBlocks} blocks, totalQ=${markingSchemeCount}, questionsPerBlock=${questionsPerBlock}, rowsPerBlock=${totalRowsPerBlock}`);
-
-                // FILTER: only keep the first questionsPerBlock rows from each block.
-                // Then remap their question_number correctly.
-                geometry.gridModel.rows = geometry.gridModel.rows.filter(row => {
-                    const origRowInBlock = (row.question_number - 1) % totalRowsPerBlock;
-                    return origRowInBlock < questionsPerBlock; // discard overflow rows
-                }).map(row => {
-                    const origBlockIdx = Math.floor((row.question_number - 1) / totalRowsPerBlock);
-                    const origRowInBlock = (row.question_number - 1) % totalRowsPerBlock;
-                    row.question_number = origBlockIdx * questionsPerBlock + origRowInBlock + 1;
-
-                    // Debug: log each kept row's x/y positions
-                    const cols = row.columns || [];
-                    const xPositions = cols.map(c => `${c.label}@${c.x}`).join(',');
-                    console.log(`[OPR Remap] Q${row.question_number} → y=${row.y} cols=[${xPositions}]`);
-                    return row;
+                // Group rows by blockIdx and sort them by Y coordinate
+                const blockGroups = {};
+                geometry.gridModel.rows.forEach(row => {
+                    const bIdx = row.blockIdx || 0;
+                    if (!blockGroups[bIdx]) blockGroups[bIdx] = [];
+                    blockGroups[bIdx].push(row);
                 });
 
+                const finalRows = [];
+                Object.keys(blockGroups).sort().forEach(bKey => {
+                    const bIdx = parseInt(bKey);
+                    const rowsInBlock = blockGroups[bKey].sort((a, b) => a.y - b.y);
+
+                    // Only take the first questionsPerBlock rows for this block
+                    const usedRows = rowsInBlock.slice(0, questionsPerBlock);
+                    usedRows.forEach((row, rowIndex) => {
+                        row.question_number = bIdx * questionsPerBlock + rowIndex + 1;
+
+                        // Debug log
+                        const cols = row.columns || [];
+                        const xPos = cols.map(c => `${c.label}@${c.x}`).join(',');
+                        console.log(`[OPR Remap] Q${row.question_number} (Block ${bIdx}) → y=${row.y} x=[${xPos}]`);
+
+                        finalRows.push(row);
+                    });
+                });
+
+                geometry.gridModel.rows = finalRows;
                 console.log(`[OPR Remap] After filter: ${geometry.gridModel.rows.length} rows kept (expected ${markingSchemeCount})`);
             }
+
 
 
             // -- STAGE 2b: Bubble Candidate Detection --

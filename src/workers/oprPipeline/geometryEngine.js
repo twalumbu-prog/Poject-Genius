@@ -245,115 +245,31 @@ function rotateImageData90CW(imageData) {
 function detectGridOnImage(imageData) {
     const { width, height, data } = imageData;
 
-    // ── STEP A: COMPUTE IMAGE BRIGHTNESS STATS FOR ADAPTIVE THRESHOLDING ──
-    let totalLuma = 0;
-    const STEP = 4; // Sample every 4th pixel for speed
-    let count = 0;
-    for (let y = 0; y < height; y += STEP) {
-        for (let x = 0; x < width; x += STEP) {
-            const i = (y * width + x) * 4;
-            totalLuma += data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-            count++;
-        }
+    // -- STEP A: BRIGHTNESS STATS --
+    let totalLuma = 0, count = 0;
+    for (let i = 0; i < data.length; i += 16) {
+        totalLuma += data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+        count++;
     }
     const meanLuma = totalLuma / count;
-    // Adaptive: treat pixels darker than (meanLuma - margin) as "ink"
     const inkThreshold = Math.max(100, meanLuma - 30);
+    console.log(`[OPR Grid] meanLuma=${Math.round(meanLuma)}, inkThreshold=${Math.round(inkThreshold)}`);
 
-    console.log(`[OPR Grid] Image ${width}x${height}, meanLuma=${Math.round(meanLuma)}, inkThreshold=${Math.round(inkThreshold)}`);
-
-    // ── STEP B: HORIZONTAL PROJECTION (full width) ──
-    const horizontalProfile = new Float32Array(height);
-    for (let y = 0; y < height; y++) {
-        let inkCount = 0;
-        for (let x = 0; x < width; x++) {
-            const i = (y * width + x) * 4;
-            const l = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-            if (l < inkThreshold) inkCount++;
-        }
-        horizontalProfile[y] = inkCount;
-    }
-
-    // ── STEP C: FIND CANDIDATE ROWS (local peaks in ink density) ──
-    // Dynamic threshold: top 30% of profile values
-    const sortedH = [...horizontalProfile].sort((a, b) => a - b);
-    const hThreshold = Math.max(2, sortedH[Math.floor(sortedH.length * 0.70)]);
-
-    const candidateRows = [];
-    let lastY = -100;
-    for (let y = 50; y < height - 50; y++) {
-        if (horizontalProfile[y] > hThreshold &&
-            horizontalProfile[y] >= horizontalProfile[y - 1] &&
-            horizontalProfile[y] >= horizontalProfile[y + 1] &&
-            y - lastY > 25) { // 25px minimum: text/borders are 16px, bubbles >25px
-            candidateRows.push({ y, h: 40, strength: horizontalProfile[y] });
-            lastY = y;
-        }
-    }
-
-    console.log(`[OPR Grid] hThreshold=${Math.round(hThreshold)}, candidateRows=${candidateRows.length}`);
-    if (candidateRows.length < 3) return { rows: [], cols: [], blocks: 0, score: 0 };
-
-    // ── STEP D: SPACING VALIDATION — filter to evenly-spaced rows ──
-    const spacings = [];
-    for (let i = 1; i < candidateRows.length; i++) {
-        spacings.push(candidateRows[i].y - candidateRows[i - 1].y);
-    }
-    spacings.sort((a, b) => a - b);
-    let medianSpacing = spacings[Math.floor(spacings.length / 2)];
-
-    // If median spacing is suspiciously small (<25px), try using a larger percentile.
-    // This handles sheets where dense text/borders inflate the lower end of spacings.
-    if (medianSpacing < 25) {
-        const p75Spacing = spacings[Math.floor(spacings.length * 0.75)];
-        if (p75Spacing >= 25) {
-            console.warn(`[OPR Grid] Median spacing ${Math.round(medianSpacing)}px too small. Using p75: ${Math.round(p75Spacing)}px`);
-            medianSpacing = p75Spacing;
-        }
-    }
-
-    const SPACING_TOLERANCE = Math.max(12, medianSpacing * 0.45);
-
-    const rows = [];
-    for (let i = 0; i < candidateRows.length; i++) {
-        const prev = i > 0 ? candidateRows[i].y - candidateRows[i - 1].y : null;
-        const next = i < candidateRows.length - 1 ? candidateRows[i + 1].y - candidateRows[i].y : null;
-        const prevOk = prev === null || Math.abs(prev - medianSpacing) < SPACING_TOLERANCE;
-        const nextOk = next === null || Math.abs(next - medianSpacing) < SPACING_TOLERANCE;
-        if (prevOk || nextOk) rows.push(candidateRows[i]);
-    }
-
-    console.log(`[OPR Grid] spacing validation: ${candidateRows.length} → ${rows.length} valid rows (medianSpacing=${Math.round(medianSpacing)}px)`);
-
-    if (rows.length < 5) return { rows: [], cols: [], blocks: 0, score: 0 };
-
-    // Store computed pitch on each row so bubbleProcessor can size patches correctly
-    rows.forEach(r => { r.pitch = medianSpacing; r.h = Math.round(medianSpacing * 0.75); });
-
-    // ── STEP E: VERTICAL PROFILE (sampled at valid row y-positions only) ──
+    // -- STEP B: VERTICAL PROFILE (Find Column Blocks First) --
+    // Sum ink vertically across the whole image
     const verticalProfile = new Float32Array(width);
-    const vWindow = 15;
     for (let x = 0; x < width; x++) {
         let inkCount = 0;
-        let samples = 0;
-        for (const row of rows) {
-            for (let dy = -vWindow; dy <= vWindow; dy++) {
-                const targetY = row.y + dy;
-                if (targetY < 0 || targetY >= height) continue;
-                const i = (targetY * width + x) * 4;
-                const l = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-                if (l < inkThreshold) inkCount++;
-                samples++;
-            }
+        for (let y = 50; y < height - 50; y += 2) {
+            const i = (y * width + x) * 4;
+            if (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 < inkThreshold) inkCount++;
         }
-        verticalProfile[x] = samples > 0 ? inkCount / samples * 100 : 0;
+        verticalProfile[x] = inkCount;
     }
 
-    // ── STEP F: DETECT COLUMN PEAKS ──
-    // Adaptive: use 70th percentile of vertical profile as threshold
+    // Detect raw column peaks
     const sortedV = [...verticalProfile].sort((a, b) => a - b);
-    const vThreshold = Math.max(1, sortedV[Math.floor(sortedV.length * 0.60)]);
-
+    const vThreshold = Math.max(5, sortedV[Math.floor(sortedV.length * 0.70)]);
     const allCols = [];
     let lastX = -40;
     for (let x = 20; x < width - 20; x++) {
@@ -361,34 +277,20 @@ function detectGridOnImage(imageData) {
             verticalProfile[x] >= verticalProfile[x - 1] &&
             verticalProfile[x] >= verticalProfile[x + 1] &&
             x - lastX > 20) {
-            allCols.push({ x, w: 35, strength: verticalProfile[x] });
+            allCols.push({ x, strength: verticalProfile[x] });
             lastX = x;
         }
     }
 
-    console.log(`[OPR Grid] vThreshold=${vThreshold.toFixed(1)}, allCols=${allCols.length}`);
-
     if (allCols.length < 4) return { rows: [], cols: [], blocks: 0, score: 0 };
 
-    // ── STEP G: GROUP COLUMN PEAKS INTO BLOCKS ──
-    // Use 85th-percentile gap as the block separator threshold
-    const gaps = [];
-    for (let i = 1; i < allCols.length; i++) {
-        gaps.push(allCols[i].x - allCols[i - 1].x);
-    }
-    const sortedGaps = [...gaps].sort((a, b) => a - b);
-    const medianGap = sortedGaps[Math.floor(sortedGaps.length / 2)];
-    const p85Gap = sortedGaps[Math.floor(sortedGaps.length * 0.85)] || medianGap;
-    // Block boundary = gap larger than median + 50% of the p85-median range
-    const blockBoundary = medianGap + (p85Gap - medianGap) * 0.5 + 5;
-
-    console.log(`[OPR Grid] medianGap=${Math.round(medianGap)}, p85Gap=${Math.round(p85Gap)}, blockBoundary=${Math.round(blockBoundary)}`);
-
+    // Group into Blocks (e.g. 2 groups of 4-5 bubbles)
     const blocks = [];
     let currentBlock = [allCols[0]];
+    const blockGapThreshold = 100; // Large gap = new block
     for (let i = 1; i < allCols.length; i++) {
         const gap = allCols[i].x - allCols[i - 1].x;
-        if (gap > blockBoundary) {
+        if (gap > blockGapThreshold) {
             if (currentBlock.length >= 4) blocks.push(currentBlock);
             currentBlock = [allCols[i]];
         } else {
@@ -396,63 +298,95 @@ function detectGridOnImage(imageData) {
         }
     }
     if (currentBlock.length >= 4) blocks.push(currentBlock);
+    console.log(`[OPR Grid] Found ${blocks.length} column blocks.`);
 
-    // Fallback: if no multi-block found, use single block
-    if (blocks.length === 0) {
-        console.warn(`[OPR Grid] Block grouping found no 4+ column blocks. Fallback to single block.`);
-        blocks.push(allCols);
-    }
-
-    console.log(`[OPR Grid] Detected ${blocks.length} column blocks from ${allCols.length} peaks.`);
-
-    // ── STEP H: CAP COLUMNS AND LABEL ──
-    const MAX_COLS_PER_BLOCK = 5;
-    const clampedBlocks = blocks.map(block => {
-        if (block.length <= MAX_COLS_PER_BLOCK) return block;
-        return [...block].sort((a, b) => b.strength - a.strength).slice(0, MAX_COLS_PER_BLOCK).sort((a, b) => a.x - b.x);
-    });
-
-    // ── STEP I: BUILD EXPANDED ROW LIST ──
+    // -- STEP C: PER-BLOCK ROW DETECTION --
     const expandedRows = [];
-    const questionsPerBlock = rows.length;
+    let grandScore = 0;
 
-    // Compute per-block column pitch for adaptive bubble sampling
-    clampedBlocks.forEach((block, blockIdx) => {
+    blocks.forEach((block, blockIdx) => {
+        // Define X-range for this block with some padding
+        const minX = Math.max(0, block[0].x - 20);
+        const maxX = Math.min(width - 1, block[block.length - 1].x + 20);
+
+        // Compute local horizontal profile (only within this block's X-range)
+        const localHProfile = new Float32Array(height);
+        for (let y = 0; y < height; y++) {
+            let inkCount = 0;
+            for (let x = minX; x <= maxX; x++) {
+                const i = (y * width + x) * 4;
+                if (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 < inkThreshold) inkCount++;
+            }
+            localHProfile[y] = inkCount;
+        }
+
+        // Find locally-significant rows for this block
+        const sortedH = [...localHProfile].sort((a, b) => a - b);
+        const hThresholdBlock = Math.max(3, sortedH[Math.floor(sortedH.length * 0.85)]);
+        const localCandidateRows = [];
+        let lastY = -100;
+        for (let y = 50; y < height - 50; y++) {
+            if (localHProfile[y] > hThresholdBlock &&
+                localHProfile[y] >= localHProfile[y - 1] &&
+                localHProfile[y] >= localHProfile[y + 1] &&
+                y - lastY > 24) {
+                localCandidateRows.push({ y, strength: localHProfile[y] });
+                lastY = y;
+            }
+        }
+
+        // Spacing validation for this block
+        const spacings = [];
+        for (let i = 1; i < localCandidateRows.length; i++) spacings.push(localCandidateRows[i].y - localCandidateRows[i - 1].y);
+        spacings.sort((a, b) => a - b);
+        let medianSpacing = spacings[Math.floor(spacings.length / 2)] || 40;
+
+        const blockRows = [];
+        const SPACING_TOL = medianSpacing * 0.4;
+        for (let i = 0; i < localCandidateRows.length; i++) {
+            const prev = i > 0 ? localCandidateRows[i].y - localCandidateRows[i - 1].y : null;
+            const next = i < localCandidateRows.length - 1 ? localCandidateRows[i + 1].y - localCandidateRows[i].y : null;
+            if ((prev && Math.abs(prev - medianSpacing) < SPACING_TOL) || (next && Math.abs(next - medianSpacing) < SPACING_TOL)) {
+                blockRows.push(localCandidateRows[i]);
+            }
+        }
+
+        // Prepare columns for this block (remap to A, B, C, D)
         const hasNum = block.length === 5;
         const optionCols = block.filter((_, i) => !(hasNum && i === 0));
-        // Compute colPitch from median inter-column gap (for patch sizing)
-        const rawXs = optionCols.map(c => c.x);
-        const gaps = [];
-        for (let i = 1; i < rawXs.length; i++) gaps.push(rawXs[i] - rawXs[i - 1]);
-        const gapsSorted = [...gaps].sort((a, b) => a - b);
-        const colPitch = gapsSorted[Math.floor(gapsSorted.length / 2)] || 30;
-
-        console.log(`[OPR Grid] Block ${blockIdx} x=[${rawXs}] pitch=${Math.round(colPitch)}`);
-
+        const colPitch = optionCols.length > 1 ? (optionCols[optionCols.length - 1].x - optionCols[0].x) / (optionCols.length - 1) : 30;
         const blockCols = optionCols.map((c, i) => ({
-            ...c,
-            // Use raw detected x position — even-spacing showed worse results
-            label: String.fromCharCode(65 + i),
-            colPitch
+            ...c, label: String.fromCharCode(65 + i), colPitch
         }));
 
+        console.log(`[OPR Grid] Block ${blockIdx}: ${blockRows.length} rows found at x=[${minX}-${maxX}]`);
 
-
-        rows.forEach((row, rowIdx) => {
+        // Assemble rows for this block
+        // IMPORTANT: We use a placeholder question_number, oprWorker.js re-numbers them properly
+        blockRows.forEach((row, i) => {
             expandedRows.push({
                 ...row,
-                question_number: blockIdx * questionsPerBlock + (rowIdx + 1),
-                columns: blockCols
+                pitch: medianSpacing,
+                h: Math.round(medianSpacing * 0.75),
+                // Give a temporary number based on block order for remap logic
+                question_number: blockIdx * 100 + (i + 1),
+                columns: blockCols,
+                blockIdx: blockIdx // metadata
             });
         });
+        grandScore += blockRows.length;
     });
 
-    const cols = clampedBlocks[0]
-        ?.filter((_, i) => !(clampedBlocks[0].length === 5 && i === 0))
-        .map((c, i) => ({ ...c, label: String.fromCharCode(65 + i) })) || [];
+    const cols = blocks[0].map((c, i) => ({ ...c, label: String.fromCharCode(65 + i) }));
 
-    return { rows: expandedRows, cols, blocks: blocks.length, score: expandedRows.length };
+    return {
+        rows: expandedRows,
+        cols,
+        blocks: blocks.length,
+        score: grandScore
+    };
 }
+
 
 function discoverGridRobust(imageData) {
     // Try current orientation
