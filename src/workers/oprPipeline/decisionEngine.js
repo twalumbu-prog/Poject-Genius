@@ -48,9 +48,9 @@ export function decideRows(classifiedBubbles, totalQuestions) {
         console.log(`[OPR Row ${qNum}] darkest=${darkest.label}(mean=${Math.round(darkest.stats.mean)}) margin=${Math.round(margin)} rowDelta=${Math.round(rowDelta)} fillRatio=${relativeFillRatio.toFixed(2)}`);
 
         // ── DECISION THRESHOLDS (Statistical) ──
-        const MIN_Z_SCORE = 1.7;    // must be 1.7+ std dev darker than row mean
-        const MIN_FILL_RATIO = 0.25;
-        const MIN_MARGIN = 0.5;      // Z-Score margin from next best option
+        const MIN_Z_SCORE = 1.5;    // lowered from 1.7: 1.5+ is significant outlier
+        const MIN_FILL_RATIO = 0.20;
+        const MIN_MARGIN = 0.4;      // Z-Score margin from next best option
 
         // Sort by Z-Score (descending = darkest first)
         const zSorted = [...bubbles].sort((a, b) => (b.zScore || 0) - (a.zScore || 0));
@@ -58,7 +58,7 @@ export function decideRows(classifiedBubbles, totalQuestions) {
         const nextZ = zSorted[1];
         const zMargin = nextZ ? (bestZ.zScore - nextZ.zScore) : 999;
 
-        // Check global pre-classified states for cross-validation
+        // Check global pre-classified states (FILLED, ERASURE_SUSPECT)
         const globalFilled = bubbles.filter(b => b.state === 'FILLED');
         const globalSuspects = bubbles.filter(b => b.state === 'ERASURE_SUSPECT');
 
@@ -66,21 +66,20 @@ export function decideRows(classifiedBubbles, totalQuestions) {
             // Confident single answer detected by Z-Score outlier
             detected_answer = bestZ.label;
             status = 'clear';
-            confidence = Math.min(0.99, 0.8 + (bestZ.zScore / 10));
+            confidence = Math.min(0.99, 0.75 + (bestZ.zScore / 10));
         } else if (globalFilled.length === 1) {
             // Global classification found exactly one filled - trust it as fallback
             detected_answer = globalFilled[0].label;
             status = 'clear';
             confidence = globalFilled[0].confidence;
-        } else if (globalFilled.length > 1) {
-            // Multiple globally filled: pick the one with highest Z-Score
-            const bestFromGlobal = globalFilled.reduce((best, b) =>
-                (b.zScore || 0) > (best.zScore || 0) ? b : best
-            );
-            detected_answer = bestFromGlobal.label;
-            status = 'clear';
-            confidence = 0.75;
-        } else if (globalSuspects.length > 0) {
+        } else if (globalFilled.length > 1 || (bestZ.zScore > 1.2 && zMargin < 0.2)) {
+            // Multi-fill detected: either global says so, or two Z-scores are high and close
+            detected_answer = globalFilled.length > 1
+                ? globalFilled.map(f => f.label).sort().join(',')
+                : (bestZ.label + ',' + nextZ.label);
+            status = 'multi';
+            confidence = 0.45;
+        } else if (globalSuspects.length > 0 || bestZ.zScore > 1.0) {
             status = 'ambiguous';
             confidence = 0.5;
         }

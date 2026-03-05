@@ -12,8 +12,10 @@ export function detectCandidates(warpedImageData, gridModel) {
     }
     const paperLuma = lumaCount > 0 ? lumaSum / lumaCount : 240;
     // Dark = anything significantly darker than paper
-    const dynamicDarkThreshold = Math.max(80, paperLuma - 60);
-    console.log(`[OPR Candidates] Paper baseline: ${Math.round(paperLuma)}, darkThreshold: ${Math.round(dynamicDarkThreshold)}`);
+    // Layer 3 (Normalization) centers paper luma at 128.
+    // Dark = significantly darker than 128. 
+    const dynamicDarkThreshold = 110;
+    console.log(`[OPR Candidates] Normalized baseline assumption: 128, darkThreshold: ${dynamicDarkThreshold}`);
 
     gridModel.rows.forEach(row => {
         const cols = row.columns || gridModel.cols;
@@ -123,11 +125,11 @@ export function classifyStates(candidates) {
             let state = 'EMPTY';
             let confidence = 0.95;
 
-            // Z-Score > 1.8 is a strong signal for "Filled" relative to row
-            if (zScore > 1.8 && fillRatio > 0.3) {
+            // Z-Score >= 1.5 is the standard OMR "Significant Outlier" signal
+            if (zScore >= 1.5 && fillRatio > 0.2) {
                 state = 'FILLED';
-                confidence = Math.min(0.99, 0.7 + (zScore / 5));
-            } else if (zScore > 1.0 || (fillRatio > 0.15 && rowMean - c.stats.mean > 25)) {
+                confidence = Math.min(0.99, 0.75 + (zScore / 5));
+            } else if (zScore >= 1.0 || (fillRatio > 0.1 && rowMean - c.stats.mean > 15)) {
                 state = 'ERASURE_SUSPECT';
                 confidence = 0.5;
             }
