@@ -25,8 +25,8 @@ export function performPageRegistration(imageData) {
  * Layers 5 & 6: Layout Detection & Grid Modeling
  * Uses binarized image to detect rows and predict expected bubble centers.
  */
-export function performGridModeling(binaryWarpedData) {
-    const { gridModel, finalImageData: orientedBinaryData } = discoverGridRobust(binaryWarpedData);
+export function performGridModeling(binaryWarpedData, expectedOptions = 4) {
+    const { gridModel, finalImageData: orientedBinaryData } = discoverGridRobust(binaryWarpedData, expectedOptions);
 
     if (gridModel.rows.length === 0 || gridModel.cols.length === 0) {
         return { success: false, reason: 'GRID_MODELING_FAILED' };
@@ -38,6 +38,7 @@ export function performGridModeling(binaryWarpedData) {
         orientedBinaryData,
         layoutResult: {
             blocks: gridModel.blocks || 1,
+            expectedOptions,
             regions: gridModel.rows.map(row => ({
                 question_number: row.question_number,
                 y: row.y,
@@ -257,7 +258,7 @@ function rotateImageData90CW(imageData) {
     return new ImageData(newData, height, width);
 }
 
-function detectGridOnImage(imageData) {
+function detectGridOnImage(imageData, expectedOptions = 4) {
     const { width, height, data } = imageData;
 
     // -- STEP A: BRIGHTNESS STATS --
@@ -353,14 +354,18 @@ function detectGridOnImage(imageData) {
     for (let i = 1; i < allCols.length; i++) gaps.push(allCols[i].x - allCols[i - 1].x);
     gaps.sort((a, b) => a - b);
     const medianGapVal = gaps[Math.floor(gaps.length / 2)] || 35;
-    const blockBoundary = medianGapVal * 1.8; // Stricter boundary to prevent merging
+    const blockBoundary = medianGapVal * 1.6;
 
+    const columnsPerBlockThreshold = expectedOptions + 1; // e.g., 5 for A-D
     const blocks = [];
     let currentBlock = [allCols[0]];
     for (let i = 1; i < allCols.length; i++) {
         const gap = allCols[i].x - allCols[i - 1].x;
-        // Split if gap is too large OR if block is getting suspiciously wide (e.g. ECZ 4-5 options)
-        if (gap > blockBoundary || currentBlock.length >= 6) {
+        // Split if gap is too large OR if block has reached its expected headcount
+        // This is critical for ECZ sheets where gaps between blocks are uniform.
+        const isHeadcountFull = currentBlock.length >= columnsPerBlockThreshold;
+
+        if (gap > blockBoundary || (isHeadcountFull && gap > medianGapVal * 0.95)) {
             if (currentBlock.length >= 4) blocks.push(currentBlock);
             currentBlock = [allCols[i]];
         } else {
@@ -373,13 +378,17 @@ function detectGridOnImage(imageData) {
     const expandedRows = [];
     validRows.forEach((row, rowIdx) => {
         blocks.forEach((block, bIdx) => {
-            // Heuristic: if block has 5+ cols and first gap is substantial, it's a Q-Num
+            // Updated Heuristic: 
+            // 1. If we have exactly options+1 cols, Col 0 is almost certainly the Number.
+            // 2. If first gap is substantial, it's definitely a Number.
             const firstGap = block.length > 1 ? (block[1].x - block[0].x) : 0;
-            const hasNum = block.length >= 5 && firstGap > medianGapVal * 1.25;
+            const hasNum = (block.length === (expectedOptions + 1)) ||
+                (block.length >= 4 && firstGap > medianGapVal * 1.25);
+
             const optionCols = block.filter((_, ci) => !(hasNum && ci === 0));
             const blockCols = optionCols.map((c, ci) => ({
                 ...c,
-                label: String.fromCharCode(65 + ci)
+                label: String.fromCharCode(64 + (ci + 1)) // 65 is 'A'
             }));
 
             expandedRows.push({
@@ -398,13 +407,14 @@ function detectGridOnImage(imageData) {
         rows: expandedRows,
         cols: allCols.map((c, i) => ({ ...c, label: String.fromCharCode(65 + i) })),
         blocks: blocks.length,
-        score: expandedRows.length
+        score: expandedRows.length,
+        expectedOptions
     };
 }
 
-function discoverGridRobust(imageData) {
+function discoverGridRobust(imageData, expectedOptions = 4) {
     // Try current orientation
-    const result0 = detectGridOnImage(imageData);
+    const result0 = detectGridOnImage(imageData, expectedOptions);
     console.log(`[OPR Grid] Orientation 0°: ${result0.score} questions, ${result0.blocks} blocks`);
 
     // If we have a very high score (e.g., full sheet), accept it immediately
@@ -413,7 +423,7 @@ function discoverGridRobust(imageData) {
     // Try rotating 90° CW
     console.warn(`[OPR Grid] 0° insufficient score. Trying 90°CW rotation...`);
     const rot90 = rotateImageData90CW(imageData);
-    const result90 = detectGridOnImage(rot90);
+    const result90 = detectGridOnImage(rot90, expectedOptions);
     console.log(`[OPR Grid] Orientation 90°CW: ${result90.score} questions, ${result90.blocks} blocks`);
 
     // If 90°CW is significantly better, use it

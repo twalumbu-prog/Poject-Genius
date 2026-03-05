@@ -14,7 +14,7 @@ self.onerror = (err) => {
 
 self.onmessage = async (e) => {
     if (e.data.messageType === 'PROCESS_OMR') {
-        const { imageBitmap, markingSchemeCount, id } = e.data;
+        const { imageBitmap, markingSchemeCount, optionsCount, id } = e.data;
 
         try {
             if (!imageBitmap) {
@@ -68,8 +68,8 @@ self.onmessage = async (e) => {
             const binaryImageData = binarizeAdaptive(normalizedImageData);
 
             // -- LAYER 5 & 6: Grid Modeling --
-            console.log('[OPR] Layer 5 & 6: Grid Modeling...');
-            const geometry = performGridModeling(binaryImageData);
+            console.log(`[OPR] Layer 5 & 6: Grid Modeling (Expected Options: ${optionsCount || 4})...`);
+            const geometry = performGridModeling(binaryImageData, optionsCount);
             if (!geometry.success) {
                 return self.postMessage({
                     success: false,

@@ -469,7 +469,8 @@ export default function MarkTest() {
                         messageType: 'PROCESS_OMR',
                         id: index,
                         imageBitmap: finalImageBitmap,
-                        markingSchemeCount: markingScheme.questions.length
+                        markingSchemeCount: markingScheme.questions.length,
+                        optionsCount: markingScheme.questions[0]?.options?.length || 4
                     }, [finalImageBitmap]); // Transfer ownership to worker
 
                     const omrResponse = await omrPromise;
