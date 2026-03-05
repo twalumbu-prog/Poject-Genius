@@ -7,13 +7,6 @@ export function extractGeometry(imageData) {
     const quadResult = detectRobustQuad(imageData);
     if (!quadResult.success) {
         console.warn(`[OPR Geometry] Quad detection failed: ${quadResult.reason}`);
-        // Fallback to safe zone for testing, but log it
-        const fallbackQuad = [
-            { x: width * 0.05, y: height * 0.05 },
-            { x: width * 0.95, y: height * 0.05 },
-            { x: width * 0.95, y: height * 0.95 },
-            { x: width * 0.05, y: height * 0.95 }
-        ];
         return { success: false, reason: quadResult.reason || 'NO_PAGE_QUAD' };
     }
 
@@ -22,10 +15,11 @@ export function extractGeometry(imageData) {
     // 2. Perspective Warp
     const TARGET_H = 1800;
     const TARGET_W = 1272;
-    const warpedImageData = warpPerspective(imageData, quad, TARGET_W, TARGET_H);
+    const initialWarpedImageData = warpPerspective(imageData, quad, TARGET_W, TARGET_H);
 
-    // 3. Grid Discovery
-    const gridModel = discoverGridRobust(warpedImageData);
+    // 3. Grid Discovery & Orientation Correction
+    // discoverGridRobust now returns the image that worked
+    const { gridModel, finalImageData } = discoverGridRobust(initialWarpedImageData);
 
     if (gridModel.rows.length === 0 || gridModel.cols.length === 0) {
         return { success: false, reason: 'GRID_DISCOVERY_FAILED', details: `Rows: ${gridModel.rows.length}, Cols: ${gridModel.cols.length}` };
@@ -33,7 +27,7 @@ export function extractGeometry(imageData) {
 
     return {
         success: true,
-        warpedImageData,
+        warpedImageData: finalImageData, // IMPORTANT: Use the image that actually has the grid
         gridModel,
         layoutResult: {
             blocks: gridModel.blocks || 1,
@@ -80,7 +74,16 @@ function detectRobustQuad(imageData) {
     }
 
     if (bestQuad) return { success: true, quad: bestQuad };
-    return { success: false, reason: 'NO_CONFIDENT_CONTOUR' };
+
+    // -- FALLBACK: Use a 'safe zone' quad if contour detection fails --
+    console.warn('[OPR Geometry] No page quad found. Falling back to safe-zone...');
+    const fallbackQuad = [
+        { x: width * 0.05, y: height * 0.05 },
+        { x: width * 0.95, y: height * 0.05 },
+        { x: width * 0.95, y: height * 0.95 },
+        { x: width * 0.05, y: height * 0.95 }
+    ];
+    return { success: true, quad: fallbackQuad, fallback: true };
 }
 
 function gaussianBlur(gray, width, height) {
@@ -238,10 +241,6 @@ function rotateImageData90CW(imageData) {
     return new ImageData(newData, height, width);
 }
 
-/**
- * Core grid detection: horizontal + vertical projection on a given ImageData.
- * Returns { rows, cols, blocks, score } — score = rows.length (0 = failure).
- */
 function detectGridOnImage(imageData) {
     const { width, height, data } = imageData;
 
@@ -253,53 +252,80 @@ function detectGridOnImage(imageData) {
     }
     const meanLuma = totalLuma / count;
     const inkThreshold = Math.max(100, meanLuma - 30);
-    console.log(`[OPR Grid] meanLuma=${Math.round(meanLuma)}, inkThreshold=${Math.round(inkThreshold)}`);
 
-    // -- STEP B: VERTICAL PROFILE (Find Column Blocks First) --
-    // Sum ink vertically across the whole image
-    const verticalProfile = new Float32Array(width);
-    // TRUNCATION: Skip top 50 and bottom 250 (avoid QR codes/headers)
-    for (let x = 0; x < width; x++) {
+    // -- STEP B: HORIZONTAL PROJECTION (Global Rows) --
+    const hProfile = new Float32Array(height);
+    for (let y = 0; y < height; y++) {
         let inkCount = 0;
-        for (let y = 50; y < height - 250; y += 2) {
+        for (let x = 50; x < width - 50; x += 4) {
             const i = (y * width + x) * 4;
             if (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 < inkThreshold) inkCount++;
         }
-        verticalProfile[x] = inkCount;
+        hProfile[y] = inkCount;
     }
 
-    // Detect raw column peaks
-    const sortedV = [...verticalProfile].sort((a, b) => a - b);
+    // Detect row peaks
+    const sortedH = [...hProfile].sort((a, b) => a - b);
+    const hThreshold = Math.max(3, sortedH[Math.floor(sortedH.length * 0.85)]);
+    const candidateRows = [];
+    let lastY = -100;
+    for (let y = 50; y < height - 50; y++) {
+        if (hProfile[y] > hThreshold && hProfile[y] >= hProfile[y - 1] && hProfile[y] >= hProfile[y + 1] && y - lastY > 24) {
+            candidateRows.push({ y, strength: hProfile[y] });
+            lastY = y;
+        }
+    }
+
+    // Spacing validation
+    const hSpacings = [];
+    for (let i = 1; i < candidateRows.length; i++) hSpacings.push(candidateRows[i].y - candidateRows[i - 1].y);
+    hSpacings.sort((a, b) => a - b);
+    const medianSpacing = hSpacings[Math.floor(hSpacings.length / 2)] || 40;
+    const validRows = candidateRows.filter((r, i) => {
+        const prev = i > 0 ? r.y - candidateRows[i - 1].y : null;
+        const next = i < candidateRows.length - 1 ? candidateRows[i + 1].y - candidateRows[i].y : null;
+        return (prev && Math.abs(prev - medianSpacing) < medianSpacing * 0.4) || (next && Math.abs(next - medianSpacing) < medianSpacing * 0.4);
+    });
+
+    // -- STEP C: VERTICAL PROJECTION (Global Columns) --
+    // TRUNCATION: Skip bottom 250px to avoid footer noise in column detection
+    const vProfile = new Float32Array(width);
+    for (let x = 0; x < width; x++) {
+        let inkCount = 0;
+        for (let y = 100; y < height - 250; y += 4) {
+            const i = (y * width + x) * 4;
+            if (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 < inkThreshold) inkCount++;
+        }
+        vProfile[x] = inkCount;
+    }
+
+    const sortedV = [...vProfile].sort((a, b) => a - b);
     const vThreshold = Math.max(5, sortedV[Math.floor(sortedV.length * 0.70)]);
     const allCols = [];
     let lastX = -40;
     for (let x = 20; x < width - 20; x++) {
-        if (verticalProfile[x] > vThreshold &&
-            verticalProfile[x] >= verticalProfile[x - 1] &&
-            verticalProfile[x] >= verticalProfile[x + 1] &&
-            x - lastX > 20) {
-            allCols.push({ x, strength: verticalProfile[x] });
+        if (vProfile[x] > vThreshold && vProfile[x] >= vProfile[x - 1] && vProfile[x] >= vProfile[x + 1] && x - lastX > 20) {
+            allCols.push({ x, strength: vProfile[x] });
             lastX = x;
         }
     }
 
-    if (allCols.length < 4) return { rows: [], cols: [], blocks: 0, score: 0 };
-
-    // -- DYNAMIC BLOCK BOUNDARY --
-    const gaps = [];
-    for (let i = 1; i < allCols.length; i++) {
-        gaps.push(allCols[i].x - allCols[i - 1].x);
+    if (allCols.length < 4 || validRows.length < 5) {
+        console.warn(`[OPR Grid] Insufficient results: cols=${allCols.length}, rows=${validRows.length}`);
+        return { rows: [], cols: [], blocks: 0, score: 0 };
     }
-    const sortedGaps = [...gaps].sort((a, b) => a - b);
-    const medianGapVal = sortedGaps[Math.floor(sortedGaps.length / 2)];
-    // Block boundary: Large gap = new block. Median * 2.5 is usually safe.
+
+    // Group columns into blocks based on large gaps
+    const gaps = [];
+    for (let i = 1; i < allCols.length; i++) gaps.push(allCols[i].x - allCols[i - 1].x);
+    gaps.sort((a, b) => a - b);
+    const medianGapVal = gaps[Math.floor(gaps.length / 2)] || 30;
     const blockBoundary = medianGapVal * 2.5;
 
     const blocks = [];
     let currentBlock = [allCols[0]];
     for (let i = 1; i < allCols.length; i++) {
-        const gap = allCols[i].x - allCols[i - 1].x;
-        if (gap > blockBoundary) {
+        if (allCols[i].x - allCols[i - 1].x > blockBoundary) {
             if (currentBlock.length >= 4) blocks.push(currentBlock);
             currentBlock = [allCols[i]];
         } else {
@@ -308,126 +334,64 @@ function detectGridOnImage(imageData) {
     }
     if (currentBlock.length >= 4) blocks.push(currentBlock);
 
-    // -- CAP COLUMNS --
-    // Prune noise: only keep the best 6 columns (Num + A-E) if extra peaks were found
-    const clampedBlocks = blocks.map(block => {
-        if (block.length <= 6) return block;
-        return [...block].sort((a, b) => b.strength - a.strength).slice(0, 6).sort((a, b) => a.x - b.x);
-    });
-
-    console.log(`[OPR Grid] Found ${clampedBlocks.length} blocks with adaptive boundary ${Math.round(blockBoundary)}px`);
-
-    // -- STEP C: PER-BLOCK ROW DETECTION --
+    // Map rows with block metadata
     const expandedRows = [];
-    let grandScore = 0;
+    validRows.forEach((row, rowIdx) => {
+        blocks.forEach((block, bIdx) => {
+            // Heuristic for multi-block: if 5+ cols, 1st is likely question number
+            const hasNum = block.length >= 5;
+            const optionCols = block.filter((_, ci) => !(hasNum && ci === 0));
+            const blockCols = optionCols.map((c, ci) => ({
+                ...c,
+                label: String.fromCharCode(65 + ci)
+            }));
 
-    clampedBlocks.forEach((block, blockIdx) => {
-        // Prepare columns for this block (remap to A, B, C, D)
-        // Heuristic: If 5 or more columns, the first one is likely the question number label
-        const hasNum = block.length >= 5;
-        const optionCols = block.filter((_, i) => !(hasNum && i === 0));
-        const colPitch = optionCols.length > 1 ? (optionCols[optionCols.length - 1].x - optionCols[0].x) / (optionCols.length - 1) : 30;
-        const blockCols = optionCols.map((c, i) => ({
-            ...c, label: String.fromCharCode(65 + i), colPitch
-        }));
-
-        // Define X-range for this block with some padding
-        const minX = Math.max(0, block[0].x - 20);
-        const maxX = Math.min(width - 1, block[block.length - 1].x + 20);
-
-        // Compute local horizontal profile (only within this block's X-range)
-        const localHProfile = new Float32Array(height);
-        for (let y = 0; y < height; y++) {
-            let inkCount = 0;
-            for (let x = minX; x <= maxX; x++) {
-                const i = (y * width + x) * 4;
-                if (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 < inkThreshold) inkCount++;
-            }
-            localHProfile[y] = inkCount;
-        }
-
-        // Find locally-significant rows for this block
-        const sortedH = [...localHProfile].sort((a, b) => a - b);
-        const hThresholdBlock = Math.max(3, sortedH[Math.floor(sortedH.length * 0.85)]);
-        const localCandidateRows = [];
-        let lastY = -100;
-        for (let y = 50; y < height - 50; y++) {
-            if (localHProfile[y] > hThresholdBlock &&
-                localHProfile[y] >= localHProfile[y - 1] &&
-                localHProfile[y] >= localHProfile[y + 1] &&
-                y - lastY > 24) {
-                localCandidateRows.push({ y, strength: localHProfile[y] });
-                lastY = y;
-            }
-        }
-
-        // Spacing validation for this block
-        const spacings = [];
-        for (let i = 1; i < localCandidateRows.length; i++) spacings.push(localCandidateRows[i].y - localCandidateRows[i - 1].y);
-        spacings.sort((a, b) => a - b);
-        let medianSpacing = spacings[Math.floor(spacings.length / 2)] || 40;
-
-        const blockRows = [];
-        const SPACING_TOL = medianSpacing * 0.4;
-        for (let i = 0; i < localCandidateRows.length; i++) {
-            const prev = i > 0 ? localCandidateRows[i].y - localCandidateRows[i - 1].y : null;
-            const next = i < localCandidateRows.length - 1 ? localCandidateRows[i + 1].y - localCandidateRows[i].y : null;
-            if ((prev && Math.abs(prev - medianSpacing) < SPACING_TOL) || (next && Math.abs(next - medianSpacing) < SPACING_TOL)) {
-                blockRows.push(localCandidateRows[i]);
-            }
-        }
-
-        console.log(`[OPR Grid] Block ${blockIdx}: ${blockRows.length} rows found at x=[${minX}-${maxX}]`);
-
-        // Assemble rows for this block
-        // IMPORTANT: We use a placeholder question_number, oprWorker.js re-numbers them properly
-        blockRows.forEach((row, i) => {
             expandedRows.push({
                 ...row,
                 pitch: medianSpacing,
                 h: Math.round(medianSpacing * 0.75),
-                // Give a temporary number based on block order for remap logic
-                question_number: blockIdx * 100 + (i + 1),
+                // Placeholders for sorting/numbering stage
+                question_number: bIdx * 100 + (rowIdx + 1),
                 columns: blockCols,
-                blockIdx: blockIdx // metadata
+                blockIdx: bIdx
             });
         });
-        grandScore += blockRows.length;
     });
-
-    const cols = clampedBlocks[0].map((c, i) => ({ ...c, label: String.fromCharCode(65 + i) }));
 
     return {
         rows: expandedRows,
-        cols,
-        blocks: clampedBlocks.length,
-        score: grandScore
+        cols: allCols.map((c, i) => ({ ...c, label: String.fromCharCode(65 + i) })),
+        blocks: blocks.length,
+        score: expandedRows.length
     };
 }
-
-
 
 function discoverGridRobust(imageData) {
     // Try current orientation
     const result0 = detectGridOnImage(imageData);
     console.log(`[OPR Grid] Orientation 0°: ${result0.score} questions, ${result0.blocks} blocks`);
 
-    if (result0.score >= 5) return result0;
+    // If we have a very high score (e.g., full sheet), accept it immediately
+    if (result0.score >= 20) return { gridModel: result0, finalImageData: imageData };
 
-    // If that failed, try rotating 90° CW
-    console.warn(`[OPR Grid] 0° orientation insufficient (${result0.score} questions). Trying 90°CW...`);
-    const rotated = rotateImageData90CW(imageData);
-    const result90 = detectGridOnImage(rotated);
+    // Try rotating 90° CW
+    console.warn(`[OPR Grid] 0° insufficient score. Trying 90°CW rotation...`);
+    const rot90 = rotateImageData90CW(imageData);
+    const result90 = detectGridOnImage(rot90);
     console.log(`[OPR Grid] Orientation 90°CW: ${result90.score} questions, ${result90.blocks} blocks`);
 
-    if (result90.score > result0.score) {
+    // If 90°CW is significantly better, use it
+    if (result90.score > result0.score + 5) {
         console.log(`[OPR Grid] Using 90°CW orientation (better: ${result90.score} vs ${result0.score})`);
-        return result90;
+        return { gridModel: result90, finalImageData: rot90 };
     }
 
-    // Return best effort even if score < 5
-    return result0.score >= result90.score ? result0 : result90;
+    // Best effort: use the one with the higher score
+    return result0.score >= result90.score ?
+        { gridModel: result0, finalImageData: imageData } :
+        { gridModel: result90, finalImageData: rot90 };
 }
+
 
 
 
