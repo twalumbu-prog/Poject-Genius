@@ -251,7 +251,8 @@ function detectGridOnImage(imageData) {
         count++;
     }
     const meanLuma = totalLuma / count;
-    const inkThreshold = Math.max(100, meanLuma - 30);
+    // Tighter threshold to prioritize dark ink and ignore grey shadows/noise
+    const inkThreshold = Math.max(95, meanLuma - 45);
 
     // -- STEP B: HORIZONTAL PROJECTION (Global Rows) --
     const hProfile = new Float32Array(height);
@@ -287,24 +288,30 @@ function detectGridOnImage(imageData) {
         return (prev && Math.abs(prev - medianSpacing) < medianSpacing * 0.4) || (next && Math.abs(next - medianSpacing) < medianSpacing * 0.4);
     });
 
-    // -- STEP C: VERTICAL PROJECTION (Global Columns) --
-    // TRUNCATION: Skip bottom 250px to avoid footer noise in column detection
+    // -- STEP C: ROW-AWARE VERTICAL PROJECTION --
+    // Instead of projecting the whole page, project only pixels aligned with confirmed rows.
+    // This is much more robust against vertical lines and text noise between rows.
     const vProfile = new Float32Array(width);
-    for (let x = 0; x < width; x++) {
-        let inkCount = 0;
-        for (let y = 100; y < height - 250; y += 4) {
-            const i = (y * width + x) * 4;
-            if (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 < inkThreshold) inkCount++;
+    validRows.forEach(row => {
+        const y = row.y;
+        for (let x = 30; x < width - 30; x++) {
+            // Sample a 9px vertical strip around each row's center
+            for (let dy = -4; dy <= 4; dy += 2) {
+                const i = ((y + dy) * width + x) * 4;
+                if (i < 0 || i >= data.length) continue;
+                if (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 < inkThreshold) {
+                    vProfile[x]++;
+                }
+            }
         }
-        vProfile[x] = inkCount;
-    }
+    });
 
     const sortedV = [...vProfile].sort((a, b) => a - b);
-    const vThreshold = Math.max(5, sortedV[Math.floor(sortedV.length * 0.70)]);
+    const vThreshold = Math.max(validRows.length * 0.5, sortedV[Math.floor(sortedV.length * 0.75)]);
     const allCols = [];
-    let lastX = -40;
-    for (let x = 20; x < width - 20; x++) {
-        if (vProfile[x] > vThreshold && vProfile[x] >= vProfile[x - 1] && vProfile[x] >= vProfile[x + 1] && x - lastX > 20) {
+    let lastX = -50;
+    for (let x = 30; x < width - 30; x++) {
+        if (vProfile[x] > vThreshold && vProfile[x] >= vProfile[x - 1] && vProfile[x] >= vProfile[x + 1] && x - lastX > 25) {
             allCols.push({ x, strength: vProfile[x] });
             lastX = x;
         }
@@ -319,13 +326,15 @@ function detectGridOnImage(imageData) {
     const gaps = [];
     for (let i = 1; i < allCols.length; i++) gaps.push(allCols[i].x - allCols[i - 1].x);
     gaps.sort((a, b) => a - b);
-    const medianGapVal = gaps[Math.floor(gaps.length / 2)] || 30;
-    const blockBoundary = medianGapVal * 2.5;
+    const medianGapVal = gaps[Math.floor(gaps.length / 2)] || 35;
+    const blockBoundary = medianGapVal * 1.8; // Stricter boundary to prevent merging
 
     const blocks = [];
     let currentBlock = [allCols[0]];
     for (let i = 1; i < allCols.length; i++) {
-        if (allCols[i].x - allCols[i - 1].x > blockBoundary) {
+        const gap = allCols[i].x - allCols[i - 1].x;
+        // Split if gap is too large OR if block is getting suspiciously wide (e.g. ECZ 4-5 options)
+        if (gap > blockBoundary || currentBlock.length >= 6) {
             if (currentBlock.length >= 4) blocks.push(currentBlock);
             currentBlock = [allCols[i]];
         } else {
@@ -338,8 +347,9 @@ function detectGridOnImage(imageData) {
     const expandedRows = [];
     validRows.forEach((row, rowIdx) => {
         blocks.forEach((block, bIdx) => {
-            // Heuristic for multi-block: if 5+ cols, 1st is likely question number
-            const hasNum = block.length >= 5;
+            // Heuristic to detect if first col is a question number vs Option A
+            const firstGap = block.length > 1 ? (block[1].x - block[0].x) : 0;
+            const hasNum = block.length >= 5 && firstGap > medianGapVal * 1.35;
             const optionCols = block.filter((_, ci) => !(hasNum && ci === 0));
             const blockCols = optionCols.map((c, ci) => ({
                 ...c,
@@ -350,8 +360,8 @@ function detectGridOnImage(imageData) {
                 ...row,
                 pitch: medianSpacing,
                 h: Math.round(medianSpacing * 0.75),
-                // Placeholders for sorting/numbering stage
-                question_number: bIdx * 100 + (rowIdx + 1),
+                // Assume standard row capacity (20) for sequential mapping
+                question_number: bIdx * 20 + (rowIdx + 1),
                 columns: blockCols,
                 blockIdx: bIdx
             });
