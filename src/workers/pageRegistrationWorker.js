@@ -531,28 +531,44 @@ function average(arr) {
 function rotateImageData(imageData, degrees) {
     const { width, height, data } = imageData;
     let newW = width, newH = height;
-    if (Math.abs(degrees) === 90 || Math.abs(degrees) === 270) {
+
+    // Normalize degrees
+    degrees = ((degrees % 360) + 360) % 360;
+
+    if (degrees === 90 || degrees === 270) {
         newW = height;
         newH = width;
     }
 
     const newData = new Uint8ClampedArray(newW * newH * 4);
+
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
             let nx, ny;
-            if (degrees === 90) { nx = height - 1 - y; ny = x; }
-            else if (degrees === -90 || degrees === 270) { nx = y; ny = width - 1 - x; }
-            else if (degrees === 180) { nx = width - 1 - x; ny = height - 1 - y; }
-            else { nx = x; ny = y; }
+            if (degrees === 90) {
+                nx = height - 1 - y;
+                ny = x;
+            } else if (degrees === 270) {
+                nx = y;
+                ny = width - 1 - x;
+            } else if (degrees === 180) {
+                nx = width - 1 - x;
+                ny = height - 1 - y;
+            } else {
+                nx = x;
+                ny = y;
+            }
 
             const si = (y * width + x) * 4;
             const di = (ny * newW + nx) * 4;
+
             newData[di] = data[si];
             newData[di + 1] = data[si + 1];
             newData[di + 2] = data[si + 2];
             newData[di + 3] = data[si + 3];
         }
     }
+
     return new ImageData(newData, newW, newH);
 }
 
