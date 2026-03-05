@@ -139,6 +139,33 @@ export default function MarkTest() {
         return new Blob([ab], { type: mimeString });
     };
 
+    // --- Helper for safe metadata rendering ---
+    const pluckSafeMetadata = (obj) => {
+        if (!obj) return null;
+        if (typeof obj !== 'object') return obj;
+
+        const safe = {};
+        for (const [key, value] of Object.entries(obj)) {
+            // Strip out large binary blobs or circular structures
+            if (value instanceof ImageData) {
+                safe[key] = `[ImageData ${value.width}x${value.height}]`;
+            } else if (value instanceof ImageBitmap) {
+                safe[key] = `[ImageBitmap ${value.width}x${value.height}]`;
+            } else if (value instanceof Blob) {
+                safe[key] = `[Blob ${value.size} bytes]`;
+            } else if (typeof value === 'string' && value.length > 5000) {
+                safe[key] = value.substring(0, 100) + '... [truncated]';
+            } else if (Array.isArray(value) && value.length > 1000) {
+                safe[key] = `[Array ${value.length} items]`;
+            } else if (value !== null && typeof value === 'object') {
+                safe[key] = pluckSafeMetadata(value);
+            } else {
+                safe[key] = value;
+            }
+        }
+        return safe;
+    };
+
 
     useEffect(() => {
         fetchTestData();
@@ -202,7 +229,7 @@ export default function MarkTest() {
 
                         <h3 style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#6b7280', marginTop: '32px', marginBottom: '16px' }}>Data Trace</h3>
                         <div style={{ background: '#000', padding: '16px', borderRadius: '12px', fontSize: '0.8rem', fontFamily: 'monospace', overflowY: 'auto', maxHeight: '150px', color: '#4ade80' }}>
-                            <pre>{JSON.stringify(metadata, null, 2)}</pre>
+                            <pre>{JSON.stringify(pluckSafeMetadata(metadata), null, 2)}</pre>
                         </div>
                     </div>
 
