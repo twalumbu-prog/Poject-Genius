@@ -18,7 +18,10 @@ export function evaluateOrientationV2(imageData) {
         const edgeScore = computeHeaderEdgeDensityScore(smallImg);
         const numberColumnScore = computeNumberColumnScore(smallImg);
 
-        const totalScore = (0.35 * gridScore) + (0.30 * ocrScore) + (0.20 * edgeScore) + (0.15 * numberColumnScore);
+        // Grid Score is the primary "Ground Truth" for OMR. If gridScore is low, 
+        // we penalize other signals to avoid being tricked by sideways text/shadows.
+        const structuralConfidence = gridScore > 0.4 ? 1.0 : 0.4;
+        const totalScore = structuralConfidence * ((0.45 * gridScore) + (0.25 * ocrScore) + (0.15 * edgeScore) + (0.15 * numberColumnScore));
 
         return {
             angle: candidate.angle,
@@ -35,7 +38,11 @@ export function evaluateOrientationV2(imageData) {
     console.log(`[Orientation V2] Evaluated in ${Math.round(t1 - t0)}ms. Best angle: ${bestCandidate.angle}° (score: ${bestCandidate.scores.totalScore.toFixed(2)})`);
     console.table(results.map(r => ({
         angle: r.angle,
-        ...r.scores
+        gridScore: r.scores.gridScore.toFixed(2),
+        ocrScore: r.scores.ocrScore.toFixed(2),
+        edgeScore: r.scores.edgeScore.toFixed(2),
+        colScore: r.scores.numberColumnScore.toFixed(2),
+        total: r.scores.totalScore.toFixed(2)
     })));
 
     return {
@@ -49,20 +56,20 @@ export function evaluateOrientationV2(imageData) {
 // --- SIGNAL SCORING FUNCTIONS ---
 
 /**
- * Signal 1: Bubble Grid Alignment (Weight: 0.35)
- * Looks for strong horizontal rows of repeating elements (bubbles)
- * in the lower 70% of the page.
+ * Signal 1: Bubble Grid Alignment (Weight: 0.45)
  */
 function computeGridScore(smallImg) {
     const { width, height, data } = smallImg;
     const startY = Math.floor(height * 0.3); // skip header
+    const profileH = height - startY;
 
     // Create horizontal projection profile of dark pixels
-    const hProfile = new Float32Array(height);
-    for (let y = startY; y < height; y++) {
+    const hProfile = new Float32Array(profileH);
+    for (let y = 0; y < profileH; y++) {
         let darkCount = 0;
+        const py = y + startY;
         for (let x = 0; x < width; x++) {
-            const luma = getLuma(data, (y * width + x) * 4);
+            const luma = getLuma(data, (py * width + x) * 4);
             if (luma < 150) darkCount++;
         }
         hProfile[y] = darkCount;
@@ -70,72 +77,71 @@ function computeGridScore(smallImg) {
 
     // Count sharp peaks in the profile which signify cleanly spaced horizontal rows
     let peakCount = 0;
-    let totalPeakEnergy = 0;
-    const avgDark = average(hProfile.slice(startY));
+    const avgDark = average(hProfile) || 1;
 
-    for (let y = startY + 2; y < height - 2; y++) {
-        if (hProfile[y] > avgDark * 1.5 &&
+    for (let y = 2; y < profileH - 2; y++) {
+        // Vertical peaks of ink correspond to bubble rows
+        if (hProfile[y] > avgDark * 1.3 &&
             hProfile[y] > hProfile[y - 1] &&
             hProfile[y] > hProfile[y + 1]) {
             peakCount++;
-            totalPeakEnergy += hProfile[y];
-            y += 3; // skip immediate neighborhood
+            y += 4; // skip thickness of a bubble
         }
     }
 
-    // ECZ sheets usually have 20 rows per block, 3 blocks vertically (or 60 rows total)
-    // Sideways orientation will have ~15 columns which becomes 15 rows, far fewer than 60.
-    const idealPeaks = 60;
-    const peakScore = Math.min(1.0, peakCount / idealPeaks);
-    const consistencyScore = totalPeakEnergy > 0 ? Math.min(1.0, (peakCount * 20) / totalPeakEnergy) : 0;
+    // ECZ sheets physically have 20 rows of questions (01-20).
+    // Even though there are 60 questions, they are in 3 columns sharing the same 20 Y-points.
+    const idealPeaks = 20;
+    const tolerance = 5; // allow 15-25 peaks
 
-    return (peakScore * 0.7) + (consistencyScore * 0.3);
+    if (peakCount >= (idealPeaks - tolerance) && peakCount <= (idealPeaks + tolerance)) {
+        return 1.0;
+    }
+
+    // Gradual falloff
+    return Math.max(0, 1.0 - Math.abs(peakCount - idealPeaks) / 20);
 }
 
 /**
- * Signal 2: Header OCR Readability Proxy (Weight: 0.30)
- * Tesseract is not available in the worker. We use a structural heuristic:
- * Printed text forms distinct, very thin, highly dense horizontal bands
- * in the top 20% of the image.
+ * Signal 2: Header OCR Readability Proxy (Weight: 0.25)
+ * Looks for WIDE text strings at the top.
  */
 function computeHeaderOCRProxyScore(smallImg) {
     const { width, height, data } = smallImg;
     const headerH = Math.floor(height * 0.2);
 
-    // Compute horizontal projection of edges in the header
-    const hProfile = new Float32Array(headerH);
-    for (let y = 0; y < headerH - 1; y++) {
-        let edges = 0;
+    let textLines = 0;
+
+    for (let y = 5; y < headerH - 5; y += 3) {
+        let lineEdges = 0;
+        let leftBound = width, rightBound = 0;
+
         for (let x = 0; x < width - 1; x++) {
             const idx = (y * width + x) * 4;
             const p = getLuma(data, idx);
             const px = getLuma(data, idx + 4);
-            if (Math.abs(p - px) > 30) edges++;
+            if (Math.abs(p - px) > 40) {
+                lineEdges++;
+                if (x < leftBound) leftBound = x;
+                if (x > rightBound) rightBound = x;
+            }
         }
-        hProfile[y] = edges;
+
+        // A valid header line (Title, Instructions) is geographically WIDE.
+        // Sideways question numbers are geographically NARROW.
+        const lineWidth = rightBound - leftBound;
+        if (lineEdges > 15 && lineWidth > (width * 0.4)) {
+            textLines++;
+        }
     }
 
-    let textLineCount = 0;
-    const avgEdges = average(hProfile) || 1;
-
-    // Look for text lines (blocks of high-density edges)
-    for (let y = 1; y < headerH - 1; y++) {
-        if (hProfile[y] > avgEdges * 2.0 && hProfile[y] > hProfile[y - 1]) {
-            textLineCount++;
-            y += 4; // skip thickness of a font line
-        }
-    }
-
-    // A good header has 3-8 clear distinct text lines (Title, Instructions, Name, etc)
-    if (textLineCount >= 3 && textLineCount <= 12) return 1.0;
-    if (textLineCount > 12) return 0.5; // too noisy
-    return textLineCount / 3.0; // partial
+    // Upright ECZ sheet should have 3-10 wide text lines in the header margin
+    if (textLines >= 2 && textLines <= 12) return 1.0;
+    return Math.min(1.0, textLines / 2);
 }
 
 /**
- * Signal 3: Header Edge Density (Weight: 0.20)
- * Reuses the robust Sobel edge margin from V1. 
- * The top 15% should have significantly more edges than the bottom 15%.
+ * Signal 3: Header Edge Density (Weight: 0.15)
  */
 function computeHeaderEdgeDensityScore(smallImg) {
     const { width, height, data } = smallImg;
@@ -148,7 +154,7 @@ function computeHeaderEdgeDensityScore(smallImg) {
             const idx = (y * width + x) * 4;
             const p = getLuma(data, idx);
             const py = getLuma(data, idx + width * 4);
-            if (Math.abs(p - py) > 25) topEdges++;
+            if (Math.abs(p - py) > 30) topEdges++;
         }
     }
 
@@ -157,49 +163,49 @@ function computeHeaderEdgeDensityScore(smallImg) {
             const idx = (y * width + x) * 4;
             const p = getLuma(data, idx);
             const py = getLuma(data, idx + width * 4);
-            if (Math.abs(p - py) > 25) bottomEdges++;
+            if (Math.abs(p - py) > 30) bottomEdges++;
         }
     }
 
-    const totalEdges = topEdges + bottomEdges;
-    if (totalEdges === 0) return 0;
-
-    // Normalised score: 1.0 if top has 100% of the edges, 0.5 if equal, 0 if bottom has 100%
-    return topEdges / totalEdges;
+    if (topEdges + bottomEdges === 0) return 0;
+    return topEdges > bottomEdges * 1.5 ? 1.0 : (topEdges / (topEdges + bottomEdges));
 }
 
 /**
  * Signal 4: Question Number Column Score (Weight: 0.15)
- * Question numbers are usually aligned vertically on the left 20% of the page
- * starting below the header.
+ * Numbers form a vertical column, but they are NOT dense like bubbles.
  */
 function computeNumberColumnScore(smallImg) {
     const { width, height, data } = smallImg;
-    const marginX = Math.floor(width * 0.2);
+    const leftMargin = Math.floor(width * 0.15);
     const startY = Math.floor(height * 0.3);
 
-    // Vertical projection profile of the left margin
-    const vProfile = new Float32Array(marginX);
-    for (let x = 0; x < marginX; x++) {
-        let darkCount = 0;
-        for (let y = startY; y < height; y++) {
+    // Vertical profile of the left margin
+    const vProfile = new Float32Array(leftMargin);
+    for (let x = 0; x < leftMargin; x++) {
+        let darkest = 0;
+        for (let y = startY; y < height - 5; y++) {
             const luma = getLuma(data, (y * width + x) * 4);
-            if (luma < 128) darkCount++;
+            if (luma < 140) darkest++;
         }
-        vProfile[x] = darkCount;
+        vProfile[x] = darkest;
     }
 
-    // Numbers form a distinct vertical column spike in the profile
-    let maxSpike = 0;
-    for (let x = 0; x < marginX; x++) {
-        if (vProfile[x] > maxSpike) maxSpike = vProfile[x];
+    let colSpike = 0;
+    for (let x = 0; x < leftMargin; x++) {
+        if (vProfile[x] > colSpike) colSpike = vProfile[x];
     }
 
-    const avgDark = average(vProfile) || 1;
-    const spikeRatio = maxSpike / avgDark;
+    // A vertical column of numbers is distinct but has gaps.
+    // A vertical column of bubbles is much denser.
+    const expectedHeight = height - startY;
+    const density = colSpike / expectedHeight;
 
-    // A strong vertical column will spike at least 3x the average of the empty margin space
-    return Math.min(1.0, spikeRatio / 5.0);
+    // Numbers usually take up 40-70% of the vertical space in their column (due to gaps between digits)
+    // Bubble columns take up >85% (they are solid blocks in projection).
+    if (density > 0.35 && density < 0.8) return 1.0;
+    if (density >= 0.8) return 0.2; // Likely a bubble column, not numbers
+    return 0;
 }
 
 // --- UTILITIES ---
