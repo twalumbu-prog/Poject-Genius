@@ -47,8 +47,9 @@ export function decideRows(classifiedBubbles, totalQuestions) {
 
         console.log(`[OPR Row ${qNum}] darkest=${darkest.label}(mean=${Math.round(darkest.stats.mean)}) margin=${Math.round(margin)} rowDelta=${Math.round(rowDelta)} fillRatio=${relativeFillRatio.toFixed(2)}`);
 
-        // ── DECISION THRESHOLDS (Statistical) ──
-        const MIN_Z_SCORE = 1.5;    // lowered from 1.7: 1.5+ is significant outlier
+        // ── DECISION THRESHOLDS (Statistical & Absolute) ──
+        const MIN_Z_SCORE = 1.5;    // 1.5+ is significant outlier
+        const ABS_FILLED_LUMA = 60; // Objectively dark (independent of row statistics)
         const MIN_FILL_RATIO = 0.20;
         const MIN_MARGIN = 0.4;      // Z-Score margin from next best option
 
@@ -59,7 +60,7 @@ export function decideRows(classifiedBubbles, totalQuestions) {
         const zMargin = nextZ ? (bestZ.zScore - nextZ.zScore) : 999;
 
         // Check global pre-classified states (FILLED, ERASURE_SUSPECT)
-        const globalFilled = bubbles.filter(b => b.state === 'FILLED');
+        const globalFilled = bubbles.filter(b => b.state === 'FILLED' || b.stats.mean < ABS_FILLED_LUMA);
         const globalSuspects = bubbles.filter(b => b.state === 'ERASURE_SUSPECT');
 
         if (bestZ.zScore >= MIN_Z_SCORE && bestZ.fillRatio >= MIN_FILL_RATIO && zMargin >= MIN_MARGIN) {
@@ -68,17 +69,20 @@ export function decideRows(classifiedBubbles, totalQuestions) {
             status = 'clear';
             confidence = Math.min(0.99, 0.75 + (bestZ.zScore / 10));
         } else if (globalFilled.length === 1) {
-            // Global classification found exactly one filled - trust it as fallback
+            // Found exactly one objectively dark or pre-classified bubble
             detected_answer = globalFilled[0].label;
             status = 'clear';
-            confidence = globalFilled[0].confidence;
-        } else if (globalFilled.length > 1 || (bestZ.zScore > 1.2 && zMargin < 0.2)) {
-            // Multi-fill detected: either global says so, or two Z-scores are high and close
-            detected_answer = globalFilled.length > 1
-                ? globalFilled.map(f => f.label).sort().join(',')
-                : (bestZ.label + ',' + nextZ.label);
+            confidence = Math.max(0.85, globalFilled[0].confidence || 0.85);
+        } else if (globalFilled.length > 1) {
+            // Multi-fill detected
+            detected_answer = [...new Set(globalFilled.map(f => f.label))].sort().join(',');
             status = 'multi';
             confidence = 0.45;
+        } else if (bestZ.zScore > 1.2 && zMargin < 0.2) {
+            // Ambiguous/Multi-fill suspect by close Z-scores
+            detected_answer = (bestZ.label + ',' + nextZ.label);
+            status = 'multi';
+            confidence = 0.4;
         } else if (globalSuspects.length > 0 || bestZ.zScore > 1.0) {
             status = 'ambiguous';
             confidence = 0.5;

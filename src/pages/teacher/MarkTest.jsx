@@ -481,6 +481,7 @@ export default function MarkTest() {
                     const normalizedURL = blobToURL(omrResponse.normalizedBlob);
                     const binaryURL = blobToURL(omrResponse.binaryBlob);
                     const warpedURL = blobToURL(omrResponse.warpedBlob);
+                    const debugURL = blobToURL(omrResponse.debugBlob);
 
                     // --- BREAKPOINT 1.5: ILLUMINATION NORMALIZATION ---
                     await awaitApproval(1.5, {
@@ -518,10 +519,25 @@ export default function MarkTest() {
                         ]
                     });
 
+                    // --- BREAKPOINT 2.1: DIAGNOSTIC CALIBRATION ---
+                    if (debugURL) {
+                        await awaitApproval(2.1, {
+                            title: 'Stage 2.1: Diagnostic Calibration',
+                            image: debugURL,
+                            metadata: { alignment: 'Visual Check', status: 'Verifying Plots' },
+                            checklist: [
+                                { label: 'Boxes Centered on Bubbles', status: 'pass' },
+                                { label: 'Question Labels Correct', status: 'pass' },
+                                { label: 'Sub-pixel Snapping Active', status: 'pass' }
+                            ]
+                        });
+                    }
+
                     // Cleanup URLs
                     if (normalizedURL) URL.revokeObjectURL(normalizedURL);
                     if (binaryURL) URL.revokeObjectURL(binaryURL);
                     if (warpedURL) URL.revokeObjectURL(warpedURL);
+                    if (debugURL) URL.revokeObjectURL(debugURL);
 
                     if (!omrResponse.success) {
                         console.warn(`[${engine.toUpperCase()}] Worker failed for script ${index + 1}: ${omrResponse.error}. Falling back to full OCR.`);

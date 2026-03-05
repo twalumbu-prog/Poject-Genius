@@ -137,6 +137,10 @@ self.onmessage = async (e) => {
             console.log('[OPR] Layer 9: Sanity Validator...');
             const sanity = validateSheet(rowResults);
 
+            // -- LAYER 10: Diagnostic Visual Overlay --
+            console.log('[OPR] Layer 10: Creating Diagnostic Overlay...');
+            const debugBlob = await createDebugOverlay(registration.warpedImageData, classifiedBubbles, geometry.gridModel.rows);
+
             console.log('[OPR] Complete!');
             // Create blobs for step-by-step inspection
             const [warpedBlob, normalizedBlob, binaryBlob] = await Promise.all([
@@ -153,6 +157,7 @@ self.onmessage = async (e) => {
                 warpedBlob,
                 normalizedBlob,
                 binaryBlob,
+                debugBlob,
                 meta: {
                     blurScore: quality.blurScore,
                     glareScore: quality.glareScore,
@@ -176,5 +181,43 @@ async function imageDataToBlob(imageData) {
     if (!imageData) return null;
     const canvas = new OffscreenCanvas(imageData.width, imageData.height);
     canvas.getContext('2d').putImageData(imageData, 0, 0);
+    return await canvas.convertToBlob();
+}
+
+/**
+ * Creates a diagnostic image with red alignment boxes and labels.
+ */
+async function createDebugOverlay(baseImageData, bubbles, rows) {
+    const { width, height } = baseImageData;
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+
+    // Draw base image
+    ctx.putImageData(baseImageData, 0, 0);
+
+    // Filter rows to only show relevant labels once per row (near column A)
+    const rowLabels = new Set();
+
+    ctx.font = 'bold 16px monospace';
+    ctx.lineWidth = 2;
+
+    bubbles.forEach(b => {
+        // Draw alignment box
+        ctx.strokeStyle = (b.state === 'FILLED') ? '#00FF00' : '#FF0000';
+        const size = b.patchSize || 20;
+        ctx.strokeRect(b.x - size / 2, b.y - size / 2, size, size);
+
+        // Draw bubble label (A, B, C...)
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.fillText(b.label, b.x - 5, b.y + 5);
+
+        // Draw question number near the first bubble of each row
+        if (!rowLabels.has(b.q_num)) {
+            ctx.fillStyle = 'blue';
+            ctx.fillText(`Q${b.q_num}`, b.x - 45, b.y + 5);
+            rowLabels.add(b.q_num);
+        }
+    });
+
     return await canvas.convertToBlob();
 }
