@@ -457,6 +457,118 @@ export function classifyROI(blobs, expectedBubbles = 4) {
 /**
  * Main public entrypoint from Web Worker
  */
+/**
+ * Helper: Run the blob detection and ROI grouping on a given ImageData.
+ * Returns { groups, columns, classifiedROIs }.
+ */
+function runDetectionOnImageData(finalImageData, markingSchemeCount) {
+    const width = finalImageData.width;
+    const height = finalImageData.height;
+
+    const gray = computeGrayscale(finalImageData);
+    const binary = binarizeAdaptive(gray, width, height);
+
+    const hProfile = computeHorizontalProjection(binary, width, height);
+    const slices = sliceROIsViaHPP(hProfile, height);
+
+    let allBubbleGroups = [];
+
+    for (const slice of slices) {
+        const blobs = findBlobs(binary, width, height, slice.y, slice.height);
+        const classification = classifyROI(blobs, markingSchemeCount);
+
+        const validCircles = classification.circleBlobs;
+        if (validCircles && validCircles.length > 0) {
+            let currentGroup = [];
+            for (let i = 0; i < validCircles.length; i++) {
+                const c = validCircles[i];
+                if (currentGroup.length === 0) {
+                    currentGroup.push(c);
+                } else {
+                    const last = currentGroup[currentGroup.length - 1];
+                    const avgW = ((last.maxX - last.minX) + (c.maxX - c.minX)) / 2;
+                    const gap = c.minX - last.maxX;
+                    if (gap > avgW * 2.0) {
+                        allBubbleGroups.push({
+                            y: slice.y, height: slice.height,
+                            confidence: Math.min(1.0, currentGroup.length / 4),
+                            circleBlobs: currentGroup
+                        });
+                        currentGroup = [c];
+                    } else {
+                        currentGroup.push(c);
+                    }
+                }
+            }
+            if (currentGroup.length > 0) {
+                allBubbleGroups.push({
+                    y: slice.y, height: slice.height,
+                    confidence: Math.min(1.0, currentGroup.length / 4),
+                    circleBlobs: currentGroup
+                });
+            }
+        }
+    }
+
+    allBubbleGroups = allBubbleGroups.filter(g => g.circleBlobs.length >= 3);
+    allBubbleGroups.forEach(g => {
+        g.centerX = (g.circleBlobs[0].minX + g.circleBlobs[g.circleBlobs.length - 1].maxX) / 2;
+    });
+
+    const columns = [];
+    const sortedByX = [...allBubbleGroups].sort((a, b) => a.centerX - b.centerX);
+    for (const g of sortedByX) {
+        let placed = false;
+        for (const col of columns) {
+            const colAvgX = col.reduce((sum, item) => sum + item.centerX, 0) / col.length;
+            if (Math.abs(g.centerX - colAvgX) < width * 0.08) {
+                col.push(g); placed = true; break;
+            }
+        }
+        if (!placed) columns.push([g]);
+    }
+    columns.sort((a, b) => a[0].centerX - b[0].centerX);
+
+    const classifiedROIs = [];
+    let qNum = 1;
+    for (const col of columns) {
+        col.sort((a, b) => a.y - b.y);
+        for (const g of col) {
+            classifiedROIs.push({
+                inferred_question_number: qNum++,
+                y: g.y, height: g.height,
+                type: 'omr', confidence: 0.9,
+                omr_options: g.circleBlobs,
+                circleBlobs: g.circleBlobs
+            });
+        }
+    }
+
+    return { slices: slices.length, groups: allBubbleGroups.length, columns: columns.length, classifiedROIs };
+}
+
+/**
+ * Rotate an ImageData 90° clockwise and return a new ImageData.
+ */
+function rotateImageData90CW(imageData) {
+    const { width, height, data } = imageData;
+    const newData = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const si = (y * width + x) * 4;
+            // 90° CW: new(x', y') = old(y, W-1-x') where new dims are H×W
+            const nx = height - 1 - y;
+            const ny = x;
+            const di = (ny * height + nx) * 4;
+            newData[di] = data[si];
+            newData[di + 1] = data[si + 1];
+            newData[di + 2] = data[si + 2];
+            newData[di + 3] = data[si + 3];
+        }
+    }
+    return new ImageData(newData, height, width);
+}
+
 export async function classifyQuestionRegions(imageBitmap, markingSchemeCount) {
     console.log("[Stage A] Starting hybrid architecture layout analysis...");
 
@@ -465,7 +577,7 @@ export async function classifyQuestionRegions(imageBitmap, markingSchemeCount) {
     const height = imageBitmap.height;
 
     // A. Draw to OffscreenCanvas to get initial raw pixels (scaled down for speed)
-    const scale = 0.5; // Process deskew on 50% size for huge speedup
+    const scale = 0.5;
     const sw = Math.round(width * scale);
     const sh = Math.round(height * scale);
     const smallCanvas = new OffscreenCanvas(sw, sh);
@@ -481,10 +593,8 @@ export async function classifyQuestionRegions(imageBitmap, markingSchemeCount) {
     // C. Render final full-size corrected image
     const canvas = new OffscreenCanvas(width, height);
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
     ctx.fillStyle = 'white';
     ctx.fillRect(0, 0, width, height);
-
     if (skewAngle !== 0) {
         ctx.translate(width / 2, height / 2);
         ctx.rotate((skewAngle * Math.PI) / 180);
@@ -493,134 +603,36 @@ export async function classifyQuestionRegions(imageBitmap, markingSchemeCount) {
     ctx.drawImage(imageBitmap, 0, 0);
     const finalImageData = ctx.getImageData(0, 0, width, height);
 
-    // 1. Convert & Binarize (Adaptive)
-    const gray = computeGrayscale(finalImageData);
-    const binary = binarizeAdaptive(gray, width, height);
+    // D. Try detection on current orientation
+    const result0 = runDetectionOnImageData(finalImageData, markingSchemeCount);
+    console.log(`[Stage A] Orientation 0°: ${result0.classifiedROIs.length} questions in ${result0.columns} columns.`);
 
-    // 2. Vertical Projection for Multi-column Guardrail
-    const vProfile = computeVerticalProjection(binary, width, height);
-    const isMultiColumn = detectMultiColumn(vProfile, height);
+    // E. If we didn't find enough questions, try rotating 90° CW
+    let bestResult = result0;
+    let bestImageData = finalImageData;
 
-    if (isMultiColumn) {
-        console.warn("[Stage A] Multi-column layout detected via vertical projection. Routing to high-level fallback.");
-        return {
-            layout: 'multi-column',
-            confidence: 0.4, // Force fallback for safety in multi-column
-            regions: [],
-            correctedImageData: finalImageData
-        };
-    }
+    if (result0.classifiedROIs.length < 5) {
+        console.log("[Stage A] Insufficient questions at 0°. Trying 90° CW rotation...");
+        const rotated90 = rotateImageData90CW(finalImageData);
+        const result90 = runDetectionOnImageData(rotated90, markingSchemeCount);
+        console.log(`[Stage A] Orientation 90°CW: ${result90.classifiedROIs.length} questions in ${result90.columns} columns.`);
 
-    // 3. Horizontal Slicing
-    const hProfile = computeHorizontalProjection(binary, width, height);
-    const slices = sliceROIsViaHPP(hProfile, height);
-    console.log(`[Stage A] Found ${slices.length} distinct horizontal regions across ${height}px height.`);
-
-    let allBubbleGroups = [];
-
-    for (const slice of slices) {
-        const blobs = findBlobs(binary, width, height, slice.y, slice.height);
-        const classification = classifyROI(blobs, markingSchemeCount);
-
-        // If a row has pure OMR bubbles (or even if it's mixed but has bubbles)
-        // We must extract the validCircles and group them by X-distance to handle
-        // multiple questions sitting on the exact same horizontal slice
-        const validCircles = classification.circleBlobs;
-        if (validCircles && validCircles.length > 0) {
-            let currentGroup = [];
-            for (let i = 0; i < validCircles.length; i++) {
-                const c = validCircles[i];
-                if (currentGroup.length === 0) {
-                    currentGroup.push(c);
-                } else {
-                    const last = currentGroup[currentGroup.length - 1];
-                    const avgW = ((last.maxX - last.minX) + (c.maxX - c.minX)) / 2;
-                    const gap = c.minX - last.maxX;
-                    // If the gap between circles is more than ~2x the width of a circle,
-                    // it is highly likely jumping to the next question's bubble column.
-                    if (gap > avgW * 2.0) {
-                        allBubbleGroups.push({
-                            y: slice.y,
-                            height: slice.height,
-                            confidence: Math.min(1.0, currentGroup.length / 4), // Roughly
-                            circleBlobs: currentGroup
-                        });
-                        currentGroup = [c];
-                    } else {
-                        currentGroup.push(c);
-                    }
-                }
-            }
-            if (currentGroup.length > 0) {
-                allBubbleGroups.push({
-                    y: slice.y,
-                    height: slice.height,
-                    confidence: Math.min(1.0, currentGroup.length / 4),
-                    circleBlobs: currentGroup
-                });
-            }
-        }
-    }
-
-    // 4. Validate and Route
-    // Filter out obvious noise (a question MUST have at least 3 bubbles horizontally)
-    allBubbleGroups = allBubbleGroups.filter(g => g.circleBlobs.length >= 3);
-
-    // 5. Column-Major Numbering
-    // Determine the center X of each group
-    allBubbleGroups.forEach(g => {
-        g.centerX = (g.circleBlobs[0].minX + g.circleBlobs[g.circleBlobs.length - 1].maxX) / 2;
-    });
-
-    const columns = [];
-    // Sort left-to-right primarily
-    const sortedByX = [...allBubbleGroups].sort((a, b) => a.centerX - b.centerX);
-
-    for (const g of sortedByX) {
-        let placed = false;
-        for (const col of columns) {
-            const colAvgX = col.reduce((sum, item) => sum + item.centerX, 0) / col.length;
-            // If the center X sits within ~8% of the page width of a column, group it
-            if (Math.abs(g.centerX - colAvgX) < width * 0.08) {
-                col.push(g);
-                placed = true;
-                break;
-            }
-        }
-        if (!placed) {
-            columns.push([g]);
-        }
-    }
-
-    // Sort columns strictly left-to-right
-    columns.sort((a, b) => a[0].centerX - b[0].centerX);
-
-    const classifiedROIs = [];
-    let qNum = 1;
-
-    // Number them going down each column
-    for (const col of columns) {
-        // Sort top-to-bottom within the column
-        col.sort((a, b) => a.y - b.y);
-        for (const g of col) {
-            classifiedROIs.push({
-                inferred_question_number: qNum++,
-                y: g.y,
-                height: g.height, // Keep structural properties for debugging UI
-                type: 'omr',
-                confidence: 0.9, // Bubble clusters structured in grids are highly confident
-                omr_options: g.circleBlobs
-            });
+        if (result90.classifiedROIs.length > result0.classifiedROIs.length) {
+            console.log("[Stage A] 90° rotation gives better result. Using rotated image.");
+            bestResult = result90;
+            bestImageData = rotated90;
         }
     }
 
     const t1 = performance.now();
-    console.log(`[Stage A] Completed in ${Math.round(t1 - t0)}ms. Grouped ${classifiedROIs.length} pure-OMR question blocks across ${columns.length} columns.`);
+    const { classifiedROIs, columns } = bestResult;
+    console.log(`[Stage A] Completed in ${Math.round(t1 - t0)}ms. Grouped ${classifiedROIs.length} pure-OMR question blocks across ${columns} columns.`);
 
     return {
         layout: "hybrid-grid",
         regions: classifiedROIs,
         processingTimeMs: Math.round(t1 - t0),
-        correctedImageData: finalImageData // Pass the straightened image forward to Stage B
+        correctedImageData: bestImageData
     };
 }
+
