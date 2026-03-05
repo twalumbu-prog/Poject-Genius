@@ -58,42 +58,57 @@ export function detectCandidates(warpedImageData, gridModel) {
 }
 
 /**
- * Finds the darkest local point in a search radius.
- * Helps bubbles "snap" to the actual filled circle if the grid is slightly misaligned.
+ * Finds the darkest local point in a search radius using a weighted centroid.
+ * Helps bubbles "snap" to the actual filled circle even if the grid is misaligned.
  */
 function findLocalDarkest(data, w, h, cx, cy, radius) {
     let minLuma = 255;
     let bestX = cx;
     let bestY = cy;
 
-    // We don't check EVERY pixel, just a sparse grid within the radius
+    // Phase 1: Coarse search for the darkest region
     for (let dy = -radius; dy <= radius; dy += 2) {
         for (let dx = -radius; dx <= radius; dx += 2) {
-            const tx = Math.round(cx + dx);
-            const ty = Math.round(cy + dy);
-            if (tx < 0 || tx >= w || ty < 0 || ty >= h) continue;
+            const tx = Math.floor(cx + dx);
+            const ty = Math.floor(cy + dy);
+            if (tx < 1 || tx >= w - 1 || ty < 1 || ty >= h - 1) continue;
 
-            // Sample a tiny 3x3 window mean at this shift
-            let sum = 0;
-            let count = 0;
-            for (let sy = -1; sy <= 1; sy++) {
-                for (let sx = -1; sx <= 1; sx++) {
-                    const idx = ((ty + sy) * w + (tx + sx)) * 4;
-                    if (idx >= 0 && idx < data.length) {
-                        sum += data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
-                        count++;
-                    }
-                }
-            }
-            const mean = sum / count;
-            if (mean < minLuma) {
-                minLuma = mean;
+            const idx = (ty * w + tx) * 4;
+            const luma = data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
+
+            if (luma < minLuma) {
+                minLuma = luma;
                 bestX = tx;
                 bestY = ty;
             }
         }
     }
-    return { x: bestX, y: bestY };
+
+    // Phase 2: Refine using centroid of dark pixels in a 5x5 window
+    // This gives us sub-pixel-like "snapping" to the center of the ink blob
+    let sumX = 0, sumY = 0, sumW = 0;
+    const searchSize = 4;
+    for (let dy = -searchSize; dy <= searchSize; dy++) {
+        for (let dx = -searchSize; dx <= searchSize; dx++) {
+            const tx = bestX + dx;
+            const ty = bestY + dy;
+            if (tx < 0 || tx >= w || ty < 0 || ty >= h) continue;
+
+            const idx = (ty * w + tx) * 4;
+            const luma = data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
+
+            // Weight is "darkness" (inverse of luma)
+            const weight = Math.pow(Math.max(0, 255 - luma), 2);
+            sumX += tx * weight;
+            sumY += ty * weight;
+            sumW += weight;
+        }
+    }
+
+    if (sumW > 0) {
+        return { x: Math.round(sumX / sumW), y: Math.round(sumY / sumW) };
+    }
+    return { x: Math.round(bestX), y: Math.round(bestY) };
 }
 
 
@@ -120,7 +135,8 @@ export function classifyStates(candidates) {
         // A filled bubble is a significant outlier from the row's own baseline.
         rowCandidates.forEach(c => {
             const zScore = rowStd > 2 ? (rowMean - c.stats.mean) / rowStd : 0;
-            const fillRatio = c.stats.darkPixels / (c.patchSize * c.patchSize);
+            // Because we ignore outlines (Inner-Circle Masking), fillRatio for empty bubbles will be < 0.05.
+            const fillRatio = c.stats.sampleCount > 0 ? c.stats.darkPixels / c.stats.sampleCount : 0;
 
             let state = 'EMPTY';
             let confidence = 0.95;
@@ -133,6 +149,9 @@ export function classifyStates(candidates) {
                 state = 'ERASURE_SUSPECT';
                 confidence = 0.5;
             }
+
+            // Updated Z-Score logic with improved signal
+            // Because we ignore outlines, fillRatio for empty bubbles will be < 0.05.
 
             results.push({
                 ...c,
@@ -152,20 +171,38 @@ function analyzePatch(data, w, h, cx, cy, size, darkThreshold = 140) {
     let sum = 0;
     let darkPixels = 0;
     const half = Math.floor(size / 2);
+    let sampleCount = 0;
+
+    // INNER-CIRCLE MASKING:
+    // We only sample pixels within 75% of the radius.
+    // This completely ignores the printed bubble outline, ensuring "Empty" bubbles
+    // have near-zero dark pixels.
+    const radiusSq = Math.pow(size * 0.38, 2);
 
     for (let y = cy - half; y < cy + half; y++) {
         for (let x = cx - half; x < cx + half; x++) {
             if (x < 0 || x >= w || y < 0 || y >= h) continue;
-            const i = (y * w + x) * 4;
-            const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-            sum += luma;
-            if (luma < darkThreshold) darkPixels++;
+
+            const dx = x - cx;
+            const dy = y - cy;
+            const distSq = dx * dx + dy * dy;
+
+            if (distSq <= radiusSq) {
+                const i = (y * w + x) * 4;
+                const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+                sum += luma;
+                if (luma < darkThreshold) darkPixels++;
+                sampleCount++;
+            }
         }
     }
 
+    if (sampleCount === 0) return { mean: 255, darkPixels: 0 };
+
     return {
-        mean: sum / (size * size),
-        darkPixels
+        mean: sum / sampleCount,
+        darkPixels,
+        sampleCount
     };
 }
 
