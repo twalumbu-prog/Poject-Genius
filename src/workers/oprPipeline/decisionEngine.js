@@ -11,30 +11,93 @@ export function decideRows(classifiedBubbles, totalQuestions) {
         rows[b.q_num].push(b);
     });
 
-    // 2. Process each row
+    // 2. Process each row using a HYBRID approach:
+    //    A) Per-row relative comparison (darkest option in row = most likely filled)
+    //    B) Cross-validate with global classification state
     for (let qNum = 1; qNum <= totalQuestions; qNum++) {
         const bubbles = rows[qNum] || [];
-        const filled = bubbles.filter(b => b.state === 'FILLED');
 
         let detected_answer = '';
         let status = 'blank';
         let confidence = 0.95;
 
-        if (filled.length === 1) {
-            detected_answer = filled[0].label;
+        if (bubbles.length === 0) {
+            results.push({ question_number: qNum, detected_answer, status, confidence, method: 'opr' });
+            continue;
+        }
+
+        // ── RELATIVE COMPARISON: compare raw patch means within this row ──
+        // Sort options by mean luma (ascending = darkest first)
+        const sorted = [...bubbles].sort((a, b) => a.stats.mean - b.stats.mean);
+        const darkest = sorted[0];
+        const secondDarkest = sorted[1];
+
+        // Compute row-local paper baseline: the brightest option in this row
+        const rowPaperMean = sorted[sorted.length - 1].stats.mean;
+
+        // The darkest option's delta from the row's own paper baseline
+        const rowDelta = rowPaperMean - darkest.stats.mean;
+
+        // Margin between darkest and second-darkest (how much it stands out)
+        const margin = secondDarkest ? (secondDarkest.stats.mean - darkest.stats.mean) : 999;
+
+        // Relative fill ratio using actual patchSize
+        const ps = darkest.patchSize || 15;
+        const relativeFillRatio = darkest.stats.darkPixels / (ps * ps);
+
+        console.log(`[OPR Row ${qNum}] darkest=${darkest.label}(mean=${Math.round(darkest.stats.mean)}) margin=${Math.round(margin)} rowDelta=${Math.round(rowDelta)} fillRatio=${relativeFillRatio.toFixed(2)}`);
+
+        // ── DECISION THRESHOLDS (tunable) ──
+        const MIN_ROW_DELTA = 20;    // darkest must be >=20 luma darker than row's own paper
+        const MIN_MARGIN = 8;        // must stand out >=8 luma from the next option
+        const MIN_FILL_RATIO = 0.20; // at least 20% of the patch must be "ink"
+
+        // Check global pre-classified states for cross-validation
+        const globalFilled = bubbles.filter(b => b.state === 'FILLED');
+        const globalSuspects = bubbles.filter(b => b.state === 'ERASURE_SUSPECT');
+
+        if (rowDelta >= MIN_ROW_DELTA && margin >= MIN_MARGIN && relativeFillRatio >= MIN_FILL_RATIO) {
+            // Confident single answer detected by relative method
+            detected_answer = darkest.label;
             status = 'clear';
-            confidence = filled[0].confidence;
-        } else if (filled.length > 1) {
-            status = 'multi';
-            detected_answer = filled.map(f => f.label).join(',');
-            confidence = 0.4;
-        } else {
-            // Check for erasure suspect if blank
-            const suspects = bubbles.filter(b => b.state === 'ERASURE_SUSPECT');
-            if (suspects.length > 0) {
-                status = 'ambiguous';
-                confidence = 0.5;
+            // Boost confidence if global classification agrees
+            if (globalFilled.length === 1 && globalFilled[0].label === darkest.label) {
+                confidence = 0.97;
+            } else if (globalFilled.length === 1 && globalFilled[0].label !== darkest.label) {
+                confidence = 0.70; // Disagreement - lower confidence
+            } else {
+                confidence = 0.85;
             }
+        } else if (globalFilled.length === 1) {
+            // Global classification found exactly one filled - trust it
+            detected_answer = globalFilled[0].label;
+            status = 'clear';
+            confidence = globalFilled[0].confidence;
+        } else if (globalFilled.length > 1) {
+            // Multiple globally filled: use relative to pick the one that stands out most
+            const bestGlobalFilled = globalFilled.reduce((best, b) =>
+                b.stats.mean < best.stats.mean ? b : best
+            );
+            // Check if one is significantly darker than the others
+            const globalSorted = globalFilled.sort((a, b) => a.stats.mean - b.stats.mean);
+            const globalMargin = globalSorted.length > 1 ? globalSorted[1].stats.mean - globalSorted[0].stats.mean : 999;
+            if (globalMargin >= MIN_MARGIN) {
+                detected_answer = bestGlobalFilled.label;
+                status = 'clear';
+                confidence = 0.75;
+            } else {
+                status = 'multi';
+                detected_answer = globalFilled.map(f => f.label).join(',');
+                confidence = 0.4;
+            }
+        } else if (globalSuspects.length > 0) {
+            status = 'ambiguous';
+            confidence = 0.5;
+        } else if (rowDelta >= MIN_ROW_DELTA * 0.6 && relativeFillRatio >= MIN_FILL_RATIO * 0.7) {
+            // Soft match - one option is darker but not meeting all thresholds
+            detected_answer = darkest.label;
+            status = 'ambiguous';
+            confidence = 0.55;
         }
 
         results.push({
