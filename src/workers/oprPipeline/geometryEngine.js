@@ -238,7 +238,7 @@ function solve(A, b) {
 }
 
 /**
- * Rotate raw ImageData 90° clockwise and return new ImageData.
+ * Rotate raw ImageData 90° clockwise.
  */
 function rotateImageData90CW(imageData) {
     const { width, height, data } = imageData;
@@ -248,6 +248,44 @@ function rotateImageData90CW(imageData) {
             const si = (y * width + x) * 4;
             const nx = height - 1 - y;
             const ny = x;
+            const di = (ny * height + nx) * 4;
+            newData[di] = data[si];
+            newData[di + 1] = data[si + 1];
+            newData[di + 2] = data[si + 2];
+            newData[di + 3] = data[si + 3];
+        }
+    }
+    return new ImageData(newData, height, width);
+}
+
+/**
+ * Rotate raw ImageData 180°.
+ */
+function rotateImageData180(imageData) {
+    const { width, height, data } = imageData;
+    const newData = new Uint8ClampedArray(width * height * 4);
+    for (let i = 0; i < width * height; i++) {
+        const si = i * 4;
+        const di = (width * height - 1 - i) * 4;
+        newData[di] = data[si];
+        newData[di + 1] = data[si + 1];
+        newData[di + 2] = data[si + 2];
+        newData[di + 3] = data[si + 3];
+    }
+    return new ImageData(newData, width, height);
+}
+
+/**
+ * Rotate raw ImageData 90° counter-clockwise (270° CW).
+ */
+function rotateImageData270(imageData) {
+    const { width, height, data } = imageData;
+    const newData = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const si = (y * width + x) * 4;
+            const nx = y;
+            const ny = width - 1 - x;
             const di = (ny * height + nx) * 4;
             newData[di] = data[si];
             newData[di + 1] = data[si + 1];
@@ -407,39 +445,100 @@ function detectGridOnImage(imageData, expectedOptions = 4) {
         });
     });
 
+    // -- STEP F: CONFIDENCE & SCORING --
+    // A high-quality grid has many valid rows and clear peak separation (sharpness).
+    // calculate average "peak to valley" ratio
+    let peakSum = 0;
+    validRows.forEach(r => peakSum += hProfile[r.y]);
+    const avgPeak = peakSum / (validRows.length || 1);
+    const backgroundLuma = sortedH[Math.floor(height * 0.1)]; // baseline noise
+    const sharpness = avgPeak / (backgroundLuma + 1);
+
+    // Final score combines headcount and structural signal
+    const structuralScore = validRows.length * sharpness * (blocks.length || 1);
+
     return {
         rows: expandedRows,
         cols: allCols.map((c, i) => ({ ...c, label: String.fromCharCode(65 + i) })),
         blocks: blocks.length,
-        score: expandedRows.length,
+        score: structuralScore,
+        count: expandedRows.length,
         expectedOptions
     };
 }
 
 function discoverGridRobust(imageData, expectedOptions = 4) {
-    // Try current orientation
-    const result0 = detectGridOnImage(imageData, expectedOptions);
-    console.log(`[OPR Grid] Orientation 0°: ${result0.score} questions, ${result0.blocks} blocks`);
+    console.log(`[OPR Grid] Analysing best orientation for ${imageData.width}x${imageData.height} scan...`);
 
-    // If we have a very high score (e.g., full sheet), accept it immediately
-    if (result0.score >= 20) return { gridModel: result0, finalImageData: imageData };
+    const orientations = [
+        { name: '0° (Portrait)', data: imageData },
+        { name: '90°CW (Landscape R)', data: rotateImageData90CW(imageData) },
+        { name: '180° (Portrait Upside-Down)', data: rotateImageData180(imageData) },
+        { name: '270°CW (Landscape L)', data: rotateImageData270(imageData) }
+    ];
 
-    // Try rotating 90° CW
-    console.warn(`[OPR Grid] 0° insufficient score. Trying 90°CW rotation...`);
-    const rot90 = rotateImageData90CW(imageData);
-    const result90 = detectGridOnImage(rot90, expectedOptions);
-    console.log(`[OPR Grid] Orientation 90°CW: ${result90.score} questions, ${result90.blocks} blocks`);
+    let bestResult = null;
+    let bestScore = -1;
+    let bestOrient = '';
 
-    // If 90°CW is significantly better, use it
-    if (result90.score > result0.score + 5) {
-        console.log(`[OPR Grid] Using 90°CW orientation (better: ${result90.score} vs ${result0.score})`);
-        return { gridModel: result90, finalImageData: rot90 };
+    for (const orient of orientations) {
+        const result = detectGridOnImage(orient.data, expectedOptions);
+        console.log(`[OPR Grid] Orientation ${orient.name}: Score=${Math.round(result.score)} blocks=${result.blocks} count=${result.count}`);
+
+        if (result.score > bestScore) {
+            bestScore = result.score;
+            bestResult = result;
+            bestOrient = orient.name;
+        }
     }
 
-    // Best effort: use the one with the higher score
-    return result0.score >= result90.score ?
-        { gridModel: result0, finalImageData: imageData } :
-        { gridModel: result90, finalImageData: rot90 };
+    // -- UP-SIDE DOWN CHECK (0° vs 180°) --
+    // If we picked a portrait orientation, verify if it should be flipped 180.
+    if (bestOrient.includes('Portrait')) {
+        const checkData = orientations.find(o => o.name === bestOrient).data;
+        const topDensity = getAreaDensity(checkData, 0, 0, checkData.width, checkData.height * 0.15);
+        const bottomDensity = getAreaDensity(checkData, 0, checkData.height * 0.85, checkData.width, checkData.height * 0.15);
+
+        console.log(`[OPR Orientation] Portrait Header density: Top=${topDensity.toFixed(3)}, Bottom=${bottomDensity.toFixed(3)}`);
+
+        // Headers/QR at top should be denser than empty footer
+        if (bottomDensity > topDensity * 1.5) {
+            console.warn(`[OPR Orientation] Detected upside-down page. Flipping 180°...`);
+            const flipped = rotateImageData180(checkData);
+            const flippedResult = detectGridOnImage(flipped, expectedOptions);
+            return { gridModel: flippedResult, finalImageData: flipped };
+        }
+    }
+
+    console.log(`[OPR Grid] Selected orientation: ${bestOrient} with score ${Math.round(bestScore)}`);
+
+    // Find the data for the best orientation
+    const finalData = orientations.find(o => o.name === bestOrient).data;
+    return { gridModel: bestResult, finalImageData: finalData };
+}
+
+/**
+ * Calculates the percentage of blackish pixels in a given area.
+ */
+function getAreaDensity(imageData, x, y, w, h) {
+    const { width, height, data } = imageData;
+    const startY = Math.max(0, Math.floor(y));
+    const endY = Math.min(height, Math.floor(y + h));
+    const startX = Math.max(0, Math.floor(x));
+    const endX = Math.min(width, Math.floor(x + w));
+
+    let blackCount = 0;
+    let totalCount = 0;
+
+    for (let py = startY; py < endY; py++) {
+        for (let px = startX; px < endX; px++) {
+            const i = (py * width + px) * 4;
+            const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+            if (luma < 128) blackCount++;
+            totalCount++;
+        }
+    }
+    return totalCount === 0 ? 0 : blackCount / totalCount;
 }
 
 
