@@ -347,6 +347,25 @@ Schema: {"questions":[{"question_text":"string","type":"multiple_choice","option
           ]
         }
       ];
+    } else if (mode === "detect_orientation") {
+      if (!image) throw new Error("image required");
+      messages = [
+        {
+          role: "system",
+          content: "You are an expert document pre-processor. Respond with strictly valid JSON.\n" +
+            "Examine the image of the OMR answer sheet. Determine the rotation needed to make the sheet upright (so text and questions read left-to-right, top-to-bottom).\n\n" +
+            "RULES:\n" +
+            "- 0: Image is already upright.\n" +
+            "- 90: Image is rotated 90 degrees clockwise (sideways to the right). Rotate 90 to fix.\n" +
+            "- 180: Image is upside down. Rotate 180 to fix.\n" +
+            "- 270: Image is rotated 90 degrees counter-clockwise (sideways to the left). Rotate 270 to fix.\n\n" +
+            "Schema: {\"rotationNeeded\": 0|90|180|270, \"confidence\": 0.0-1.0, \"rationale\": \"string\"}"
+        },
+        {
+          role: "user",
+          content: [{ type: "text", text: "What rotation is needed to make this page upright?" }, ...buildParts()]
+        }
+      ];
     } else if (mode === "solve_questions") {
       if (!testParams?.questions) throw new Error("testParams.questions required");
       messages = [

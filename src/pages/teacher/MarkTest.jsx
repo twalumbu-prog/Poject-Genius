@@ -139,6 +139,59 @@ export default function MarkTest() {
         return new Blob([ab], { type: mimeString });
     };
 
+    /**
+     * AI-Powered Orientation Detection
+     * Uses Gemini Vision to determine the standard upright rotation.
+     */
+    const detectAiOrientation = async (base64) => {
+        try {
+            const { data, error } = await supabase.functions.invoke('process-test-ai', {
+                body: {
+                    mode: 'detect_orientation',
+                    image: base64
+                }
+            });
+
+            if (error) throw error;
+            return data;
+        } catch (err) {
+            console.error('[AI Orientation] Failed:', err);
+            return { rotationNeeded: 0, confidence: 0, error: err.message };
+        }
+    };
+
+    /**
+     * High-quality canvas-based rotation
+     */
+    const rotateBase64 = async (base64, degrees) => {
+        if (degrees === 0) return base64;
+
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+
+                // Set dimensions
+                if (degrees === 90 || degrees === 270) {
+                    canvas.width = img.height;
+                    canvas.height = img.width;
+                } else {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                }
+
+                // Transform
+                ctx.translate(canvas.width / 2, canvas.height / 2);
+                ctx.rotate((degrees * Math.PI) / 180);
+                ctx.drawImage(img, -img.width / 2, -img.height / 2);
+
+                resolve(canvas.toDataURL('image/jpeg', 0.9));
+            };
+            img.src = base64;
+        });
+    };
+
     // --- Helper for safe metadata rendering ---
     const pluckSafeMetadata = (obj) => {
         if (!obj) return null;
@@ -349,7 +402,10 @@ export default function MarkTest() {
             };
 
             const processItem = async (item) => {
-                const { base64, label, index } = item;
+                const { base64: originalBase64, label, index } = item;
+                let activeBase64 = originalBase64;
+                let aiOrientation = null;
+
                 const awaitApproval = async (step, data) => {
                     if (!inspectionMode) return;
                     setInspectionData(data);
@@ -366,9 +422,30 @@ export default function MarkTest() {
                 setProcessingStatus(`Marking script ${index + 1} of ${total}${total > 1 ? `: ${label}` : ''}...`);
 
                 try {
+                    // --- STAGE 0.1: AI ORIENTATION DETECTION (NEW) ---
+                    setProcessingStatus(`[AI Orientation] Verifying page rotation for script ${index + 1}...`);
+                    aiOrientation = await detectAiOrientation(activeBase64);
+
+                    if (aiOrientation.rotationNeeded && aiOrientation.rotationNeeded !== 0) {
+                        console.log(`[AI Orientation] Detected ${aiOrientation.rotationNeeded}° rotation needed. Correcting...`);
+                        activeBase64 = await rotateBase64(activeBase64, aiOrientation.rotationNeeded);
+                    }
+
+                    // INSPECTION BREAKPOINT FOR ORIENTATION
+                    await awaitApproval(0.1, {
+                        title: 'Stage 0.1: AI Orientation Detect',
+                        image: activeBase64,
+                        metadata: aiOrientation,
+                        checklist: [
+                            { label: 'AI Analysed', status: 'pass' },
+                            { label: `Rotation Found: ${aiOrientation.rotationNeeded}°`, status: aiOrientation.rotationNeeded === 0 ? 'pass' : 'info' },
+                            { label: `AI Confidence: ${(aiOrientation.confidence * 100).toFixed(1)}%`, status: aiOrientation.confidence > 0.8 ? 'pass' : 'warn' }
+                        ]
+                    });
+
                     // --- STAGE 0: PAGE REGISTRATION ---
                     setProcessingStatus(`[Registration] Aligning page geometry for script ${index + 1}...`);
-                    const blob = base64ToBlob(base64);
+                    const blob = base64ToBlob(activeBase64);
                     const rawBitmap = await createImageBitmap(blob);
 
                     const regWorker = new Worker(new URL('../../workers/pageRegistrationWorker.js', import.meta.url), { type: 'module' });
@@ -386,8 +463,8 @@ export default function MarkTest() {
                     regWorker.terminate();
 
                     let finalImageBitmap;
-                    let aiBase64 = base64; // Default to original for AI
-                    let finalBase64 = base64; // Fallback to original for UI
+                    let aiBase64 = activeBase64; // Use corrected version as baseline for AI
+                    let finalBase64 = activeBase64; // Fallback to corrected for UI
 
                     if (regResponse.page_detected && regResponse.warpedImageData) {
                         // Stage 0 succeeded. Convert warped ImageData back to ImageBitmap
