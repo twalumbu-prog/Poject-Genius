@@ -491,22 +491,23 @@ function detectAndFixRotation(imageData) {
 
     let workingData = imageData;
 
-    // STEP 1: Ensure it's Portrait
-    if (width > height) {
-        // Image is landscape. The rows are currently running vertically.
+    // STEP 1: Determine if image content is rotated 90 degrees
+    // If the image is currently portrait, but the content is landscape,
+    // the "rows" run vertically, so vPeaks will be much higher than hPeaks.
+    if (vPeaks > hPeaks * 1.2) {
         // We need to rotate 90 degrees.
         // Let's decide +90 (CW) or -90 (CCW) by checking ink density.
-        // The headers (QR, Name, etc.) should be at the 'top'.
+        // In a typical ECZ sheet, there is a dense header block at the "Top".
+        // If it was captured rotated 90 CW (Top is Right), left density < right density. -> Fix: 270 CW.
+        // If it was captured rotated 90 CCW (Top is Left), left density > right density. -> Fix: 90 CW.
         const leftDensity = average(vProfile.slice(0, Math.floor(sw / 4)));
         const rightDensity = average(vProfile.slice(Math.floor(3 * sw / 4)));
 
         if (leftDensity > rightDensity) {
-            // Top of the page is on the left -> Rotate 90 CW
-            console.warn("[Orientation] Landscape (Top is Left). Rotating 90° CW...");
+            console.warn("[Orientation] Content is sideways (Top is Left). Rotating 90° CW...");
             workingData = rotateImageData(workingData, 90);
         } else {
-            // Top of the page is on the right -> Rotate 90 CCW (or 270 CW)
-            console.warn("[Orientation] Landscape (Top is Right). Rotating 270° CW...");
+            console.warn("[Orientation] Content is sideways (Top is Right). Rotating 270° CW...");
             workingData = rotateImageData(workingData, 270);
         }
     }
@@ -536,7 +537,7 @@ function detectAndFixRotation(imageData) {
         }
     }
 
-    console.log(`[Orientation] Portrait Header Ink: Top=${topInk}, Bottom=${bottomInk}`);
+    console.log(`[Orientation] Upright Header Ink: Top=${topInk}, Bottom=${bottomInk}`);
 
     // If the bottom has significantly more ink than the top, it's upside down.
     if (bottomInk > topInk * 1.5) {

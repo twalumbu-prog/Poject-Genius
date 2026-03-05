@@ -467,9 +467,47 @@ function detectGridOnImage(imageData, expectedOptions = 4) {
     };
 }
 
+function transposeImageData(imageData) {
+    const { width, height, data } = imageData;
+    const newData = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const si = (y * width + x) * 4;
+            const di = (x * height + y) * 4; // x and y swapped
+            newData[di] = data[si];
+            newData[di + 1] = data[si + 1];
+            newData[di + 2] = data[si + 2];
+            newData[di + 3] = data[si + 3];
+        }
+    }
+    return new ImageData(newData, height, width);
+}
+
 function discoverGridRobust(imageData, expectedOptions = 4) {
-    // Orientation is now strictly handled and corrected by pageRegistrationWorker.js
-    // before the OMR pipeline even begins. The imageData here is guaranteed to be upright portrait.
+    // Orientation is handled by pageRegistrationWorker.js mapping the page upright.
+    // However, if the sheet is Landscape (width > height), the bubble options are 
+    // arranged vertically. Our core detectGridOnImage expects horizontal options.
+    // Solution: Transpose the image, run the detection, and transpose the results back!
+    if (imageData.width > imageData.height) {
+        console.log(`[OPR Grid] Landscape page detected. Transposing for vertical-option processing...`);
+        const transposed = transposeImageData(imageData);
+        const result = detectGridOnImage(transposed, expectedOptions);
+
+        // Transpose all coordinates in the result back to Landscape
+        result.rows.forEach(r => {
+            const tx = r.x, ty = r.y, tw = r.w, th = r.h;
+            r.x = ty; r.y = tx; r.w = th; r.h = tw;
+
+            r.columns.forEach(c => {
+                const cx = c.x, cy = c.y, cw = c.w, ch = c.h;
+                c.x = cy; c.y = cx; c.w = ch; c.h = cw;
+            });
+        });
+
+        return { gridModel: result, finalImageData: imageData };
+    }
+
+    // Default Portrait processing
     const result = detectGridOnImage(imageData, expectedOptions);
     return { gridModel: result, finalImageData: imageData };
 }
