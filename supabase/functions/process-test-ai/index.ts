@@ -6,9 +6,11 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
 const GEMINI_MODELS = [
+  "gemini-flash-latest",
+  "gemini-pro-latest",
+  "gemini-2.5-flash",
+  "gemini-3.1-flash-image-preview",
   "gemini-1.5-flash-latest",
-  "gemini-1.5-pro-latest",
-  "gemini-2.0-flash-exp",
   "gemini-1.5-flash",
   "gemini-1.5-pro",
 ];
