@@ -285,7 +285,7 @@ function detectGridOnImage(imageData) {
         if (horizontalProfile[y] > hThreshold &&
             horizontalProfile[y] >= horizontalProfile[y - 1] &&
             horizontalProfile[y] >= horizontalProfile[y + 1] &&
-            y - lastY > 15) {
+            y - lastY > 25) { // 25px minimum: text/borders are 16px, bubbles >25px
             candidateRows.push({ y, h: 40, strength: horizontalProfile[y] });
             lastY = y;
         }
@@ -300,7 +300,18 @@ function detectGridOnImage(imageData) {
         spacings.push(candidateRows[i].y - candidateRows[i - 1].y);
     }
     spacings.sort((a, b) => a - b);
-    const medianSpacing = spacings[Math.floor(spacings.length / 2)];
+    let medianSpacing = spacings[Math.floor(spacings.length / 2)];
+
+    // If median spacing is suspiciously small (<25px), try using a larger percentile.
+    // This handles sheets where dense text/borders inflate the lower end of spacings.
+    if (medianSpacing < 25) {
+        const p75Spacing = spacings[Math.floor(spacings.length * 0.75)];
+        if (p75Spacing >= 25) {
+            console.warn(`[OPR Grid] Median spacing ${Math.round(medianSpacing)}px too small. Using p75: ${Math.round(p75Spacing)}px`);
+            medianSpacing = p75Spacing;
+        }
+    }
+
     const SPACING_TOLERANCE = Math.max(12, medianSpacing * 0.45);
 
     const rows = [];
@@ -315,6 +326,9 @@ function detectGridOnImage(imageData) {
     console.log(`[OPR Grid] spacing validation: ${candidateRows.length} → ${rows.length} valid rows (medianSpacing=${Math.round(medianSpacing)}px)`);
 
     if (rows.length < 5) return { rows: [], cols: [], blocks: 0, score: 0 };
+
+    // Store computed pitch on each row so bubbleProcessor can size patches correctly
+    rows.forEach(r => { r.pitch = medianSpacing; r.h = Math.round(medianSpacing * 0.75); });
 
     // ── STEP E: VERTICAL PROFILE (sampled at valid row y-positions only) ──
     const verticalProfile = new Float32Array(width);
@@ -402,11 +416,18 @@ function detectGridOnImage(imageData) {
     const expandedRows = [];
     const questionsPerBlock = rows.length;
 
+    // Compute per-block column pitch for adaptive bubble sampling
     clampedBlocks.forEach((block, blockIdx) => {
         const hasNum = block.length === 5;
-        const blockCols = block
-            .filter((_, i) => !(hasNum && i === 0))
-            .map((c, i) => ({ ...c, label: String.fromCharCode(65 + i) }));
+        const optionCols = block.filter((_, i) => !(hasNum && i === 0));
+        const colPitch = optionCols.length > 1
+            ? (optionCols[optionCols.length - 1].x - optionCols[0].x) / (optionCols.length - 1)
+            : 30;
+        const blockCols = optionCols.map((c, i) => ({
+            ...c,
+            label: String.fromCharCode(65 + i),
+            colPitch  // Pass column spacing downstream
+        }));
 
         rows.forEach((row, rowIdx) => {
             expandedRows.push({

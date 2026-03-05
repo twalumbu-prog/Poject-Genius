@@ -4,17 +4,35 @@ export function detectCandidates(warpedImageData, gridModel) {
     const { width, height, data } = warpedImageData;
     const candidates = [];
 
-    // For each expected intersection in the grid, we look for a bubble
+    // Compute global paper brightness for adaptive threshold
+    let lumaSum = 0, lumaCount = 0;
+    for (let i = 0; i < data.length; i += 16) { // every 4th pixel
+        const l = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+        if (l > 180) { lumaSum += l; lumaCount++; } // only bright (paper) pixels
+    }
+    const paperLuma = lumaCount > 0 ? lumaSum / lumaCount : 240;
+    // Dark = anything significantly darker than paper
+    const dynamicDarkThreshold = Math.max(80, paperLuma - 60);
+    console.log(`[OPR Candidates] Paper baseline: ${Math.round(paperLuma)}, darkThreshold: ${Math.round(dynamicDarkThreshold)}`);
+
     gridModel.rows.forEach(row => {
-        // Multi-column support: use columns specific to this row/block
         const cols = row.columns || gridModel.cols;
+        const rowPitch = row.pitch || 40; // from geometryEngine
+
         cols.forEach(col => {
-            // Sample a patch around the expected center
             const centerX = col.x;
             const centerY = row.y;
-            const patchSize = 30; // 30x30 patch
 
-            const stats = analyzePatch(data, width, height, centerX, centerY, patchSize);
+            // Adaptive patch: use half the tighter of row-pitch or column-pitch
+            // Clamped between 12 (minimum useful) and 28 (max before overlap risk)
+            const colPitch = col.colPitch || 30;
+            const patchSize = Math.round(Math.min(
+                Math.max(12, rowPitch * 0.65),
+                Math.max(12, colPitch * 0.65),
+                28
+            ));
+
+            const stats = analyzePatch(data, width, height, centerX, centerY, patchSize, dynamicDarkThreshold);
 
             candidates.push({
                 bubble_id: `r${row.y}c${col.x}`,
@@ -22,6 +40,7 @@ export function detectCandidates(warpedImageData, gridModel) {
                 label: col.label,
                 x: centerX,
                 y: centerY,
+                patchSize, // expose for debugging
                 stats
             });
         });
@@ -29,6 +48,7 @@ export function detectCandidates(warpedImageData, gridModel) {
 
     return candidates;
 }
+
 
 export function classifyStates(candidates) {
     // 1. Compute global "paper" baseline from empty-looking patches
@@ -66,12 +86,10 @@ export function classifyStates(candidates) {
     });
 }
 
-function analyzePatch(data, w, h, cx, cy, size) {
+function analyzePatch(data, w, h, cx, cy, size, darkThreshold = 140) {
     let sum = 0;
     let darkPixels = 0;
     const half = Math.floor(size / 2);
-    // Dark threshold is relative to 255. In a dark room, paper might be 150.
-    const darkThreshold = 140;
 
     for (let y = cy - half; y < cy + half; y++) {
         for (let x = cx - half; x < cx + half; x++) {
@@ -88,3 +106,4 @@ function analyzePatch(data, w, h, cx, cy, size) {
         darkPixels
     };
 }
+
